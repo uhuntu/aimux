@@ -27,9 +27,15 @@ git clone https://github.com/uhuntu/aimux.git
 cd aimux && ./install.sh
 ```
 
-Either of the last two symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir`). The curl form clones the repo to `~/.local/share/aimux` first (override with `AIMUX_REPO_DIR`). Nothing is copied — the clone stays the source of truth, so `git -C ~/.local/share/aimux pull` (or re-running the curl command) picks up updates.
+Either of the last two symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir`). The curl form clones the repo to `~/.local/share/aimux` first (override with `AIMUX_REPO_DIR`). Nothing is copied — the clone stays the source of truth.
 
 Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only the ones you actually use need to be present).
+
+## Update
+
+- **pip**: `pip install --upgrade aimux-cli`
+- **curl**: re-run the same one-liner — it fast-forwards the existing clone (`git pull --ff-only`) before relinking
+- **git**: `git -C /path/to/aimux pull` — the symlinks point straight into the repo, so this alone is enough; no need to re-run `install.sh`
 
 ## Usage
 
