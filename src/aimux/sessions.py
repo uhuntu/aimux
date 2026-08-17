@@ -54,9 +54,13 @@ def read_jsonl(path):
 # ---------- claude ----------
 
 def claude_light_records():
-    records = []
+    # Claude Code stores a session's transcript under more than one project
+    # directory when the session touches more than one cwd (e.g. via `cd` in
+    # tool calls), so the same session id can show up multiple times here.
+    # Keep only the most recently modified copy per id.
+    by_id = {}
     if not os.path.isdir(CLAUDE_PROJECTS):
-        return records
+        return []
     for proj_dir in os.listdir(CLAUDE_PROJECTS):
         full_dir = os.path.join(CLAUDE_PROJECTS, proj_dir)
         if not os.path.isdir(full_dir):
@@ -67,9 +71,11 @@ def claude_light_records():
                 mtime = os.path.getmtime(path)
             except OSError:
                 continue
+            if sid in by_id and by_id[sid]["ts"] >= mtime:
+                continue
             cwd_guess = proj_dir.replace("-", "/") if proj_dir.startswith("-") else proj_dir
-            records.append({"tool": "claude", "id": sid, "ts": mtime, "path": path, "cwd": cwd_guess})
-    return records
+            by_id[sid] = {"tool": "claude", "id": sid, "ts": mtime, "path": path, "cwd": cwd_guess}
+    return list(by_id.values())
 
 
 def claude_title_and_cwd(path, cwd_fallback):

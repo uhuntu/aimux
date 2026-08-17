@@ -1,4 +1,5 @@
 import json
+import os
 import time
 
 import pytest
@@ -70,6 +71,34 @@ def test_codex_resolve_prefix_match(monkeypatch, tmp_path):
 
 
 # ---------- claude ----------
+
+def test_claude_light_records_dedupes_same_session_across_project_dirs(monkeypatch, tmp_path):
+    """Regression test: Claude Code stores a session's transcript under
+    every project directory the session's cwd ever touched (e.g. via `cd`
+    in tool calls), so the same session id can appear as multiple files.
+    Only the most recently modified copy should be reported."""
+    projects = tmp_path / "projects"
+    dir_a = projects / "-home-hunt"
+    dir_b = projects / "-home-hunt-work-aimux"
+    dir_a.mkdir(parents=True)
+    dir_b.mkdir(parents=True)
+
+    sid = "cd385445-cec2-43c6-9919-69e87818d2dc"
+    old_copy = dir_a / f"{sid}.jsonl"
+    new_copy = dir_b / f"{sid}.jsonl"
+    old_copy.write_text("{}\n")
+    new_copy.write_text("{}\n")
+
+    now = time.time()
+    os.utime(old_copy, (now - 100, now - 100))
+    os.utime(new_copy, (now, now))
+
+    monkeypatch.setattr(sessions, "CLAUDE_PROJECTS", str(projects))
+
+    recs = sessions.claude_light_records()
+    assert len(recs) == 1
+    assert recs[0]["path"] == str(new_copy)  # kept the more recently modified copy
+
 
 def test_claude_title_and_cwd_prefers_real_cwd_over_dirname_guess(tmp_path):
     session_file = tmp_path / "abcd1234.jsonl"
