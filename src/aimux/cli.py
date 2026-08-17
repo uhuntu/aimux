@@ -2,10 +2,9 @@
 Normalizes a handful of common flags across the three tools and passes
 everything else straight through.
 """
-import os
 import sys
 
-from . import sessions
+from . import __version__, sessions
 
 USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
        ai sessions [--tool T] [--limit N] [--cwd] [--all]
@@ -39,29 +38,18 @@ Examples:
 TOOLS = ("claude", "codex", "kimi")
 
 
-def main():
-    argv = sys.argv[1:]
+class UsageError(Exception):
+    """Bad arguments to `ai <tool> ...`. Caught by main() and reported
+    cleanly; kept separate from sys.exit so build_command stays a pure,
+    testable function."""
 
-    if argv and argv[0] in ("-h", "--help"):
-        print(USAGE)
-        return
 
-    if not argv:
-        sessions.cmd_list(["--limit", "15"])
-        return
-
-    tool, rest = argv[0], argv[1:]
-
-    if tool == "sessions":
-        sessions.cmd_list(rest)
-        return
-    if tool == "resume":
-        sessions.cmd_resume(rest)
-        return
-
+def build_command(tool, rest):
+    """Normalize `rest` (the args after the tool name) into the native
+    command to run. Pure function, no I/O — raises UsageError on bad
+    input instead of exiting, so it's easy to unit test."""
     if tool not in TOOLS:
-        print(f"ai: unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume)", file=sys.stderr)
-        sys.exit(1)
+        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume)")
 
     print_ = False
     continue_session = False
@@ -81,14 +69,12 @@ def main():
             i += 1
         elif a in ("-m", "--model"):
             if i + 1 >= len(rest):
-                print("ai: --model requires a value", file=sys.stderr)
-                sys.exit(1)
+                raise UsageError("--model requires a value")
             model = rest[i + 1]
             i += 2
         elif a == "--add-dir":
             if i + 1 >= len(rest):
-                print("ai: --add-dir requires a value", file=sys.stderr)
-                sys.exit(1)
+                raise UsageError("--add-dir requires a value")
             add_dirs.append(rest[i + 1])
             i += 2
         elif a in ("-y", "--yolo"):
@@ -141,7 +127,39 @@ def main():
             cmd.append("-y")
 
     cmd += trailing
-    os.execvp(cmd[0], cmd)
+    return cmd
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if argv and argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return
+    if argv and argv[0] in ("-v", "--version"):
+        print(f"aimux {__version__}")
+        return
+
+    if not argv:
+        sessions.cmd_list(["--limit", "15"])
+        return
+
+    tool, rest = argv[0], argv[1:]
+
+    if tool == "sessions":
+        sessions.cmd_list(rest)
+        return
+    if tool == "resume":
+        sessions.cmd_resume(rest)
+        return
+
+    try:
+        cmd = build_command(tool, rest)
+    except UsageError as e:
+        print(f"ai: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    sessions.exec_or_die(cmd)
 
 
 if __name__ == "__main__":

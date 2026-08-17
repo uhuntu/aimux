@@ -1,6 +1,7 @@
 """Session listing/resuming across claude, codex, and kimi CLIs.
 Invoked via `ai sessions` / `ai resume`, or standalone as `ai-sessions`.
 """
+import calendar
 import glob
 import json
 import os
@@ -15,6 +16,16 @@ KIMI_HOME = os.path.join(HOME, ".kimi-code")
 UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 
 TOOLS = ("claude", "codex", "kimi")
+
+
+def exec_or_die(argv):
+    """os.execvp, but with a clean message instead of a traceback if the
+    binary isn't on PATH."""
+    try:
+        os.execvp(argv[0], argv)
+    except FileNotFoundError:
+        print(f"ai: '{argv[0]}' not found on PATH", file=sys.stderr)
+        sys.exit(127)
 
 
 def read_json(path):
@@ -61,17 +72,25 @@ def claude_light_records():
     return records
 
 
-def claude_title(path):
+def claude_title_and_cwd(path, cwd_fallback):
+    """Scan a session's jsonl once for both a title (first user message)
+    and the real cwd (more reliable than guessing from the project
+    directory name, which can't distinguish literal dashes in a path
+    from directory separators)."""
+    title = "(no title)"
+    cwd = None
     try:
         with open(path) as fh:
             for i, line in enumerate(fh):
-                if i > 40:
+                if i > 40 or (title != "(no title)" and cwd):
                     break
                 try:
                     d = json.loads(line)
                 except Exception:
                     continue
-                if d.get("type") != "user":
+                if cwd is None and d.get("cwd"):
+                    cwd = d["cwd"]
+                if title != "(no title)" or d.get("type") != "user":
                     continue
                 msg = d.get("message", {})
                 content = msg.get("content")
@@ -84,10 +103,10 @@ def claude_title(path):
                             text = block.get("text")
                             break
                 if text:
-                    return text.strip().replace("\n", " ")[:70]
+                    title = text.strip().replace("\n", " ")[:70]
     except FileNotFoundError:
         pass
-    return "(no title)"
+    return title, (cwd or cwd_fallback)
 
 
 def claude_resolve(prefix):
@@ -113,7 +132,9 @@ def codex_light_records():
             continue
         updated = entry.get("updated_at")
         try:
-            ts = time.mktime(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))
+            # updated_at is UTC ("...Z"); timegm (unlike mktime) treats the
+            # parsed struct as UTC instead of local time.
+            ts = calendar.timegm(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))
         except Exception:
             ts = 0
         records.append({
@@ -233,13 +254,29 @@ def cmd_list(args):
     tool_filter = None
     cwd_filter = False
     show_all = False
+    def next_value(flag, i):
+        if i + 1 >= len(args):
+            print(f"ai sessions: {flag} requires a value", file=sys.stderr)
+            sys.exit(1)
+        return args[i + 1]
+
     i = 0
     while i < len(args):
         a = args[i]
         if a == "--limit":
-            limit = int(args[i + 1]); i += 2
+            raw = next_value(a, i)
+            try:
+                limit = int(raw)
+            except ValueError:
+                print(f"ai sessions: --limit expects a number, got '{raw}'", file=sys.stderr)
+                sys.exit(1)
+            i += 2
         elif a == "--tool":
-            tool_filter = args[i + 1]; i += 2
+            tool_filter = next_value(a, i)
+            if tool_filter not in TOOLS:
+                print(f"ai sessions: --tool must be one of {', '.join(TOOLS)}", file=sys.stderr)
+                sys.exit(1)
+            i += 2
         elif a == "--cwd":
             cwd_filter = True; i += 1
         elif a == "--all":
@@ -268,8 +305,8 @@ def cmd_list(args):
     for r in top:
         tool = r["tool"]
         if tool == "claude":
-            title = claude_title(r["path"])
-            cwd_show = r.get("cwd") or "?"
+            title, cwd_resolved = claude_title_and_cwd(r["path"], r.get("cwd"))
+            cwd_show = cwd_resolved or "?"
         elif tool == "codex":
             title = r.get("title", "(no title)")
             cwd_show = codex_cwd(r["id"]) or "?"
@@ -303,11 +340,11 @@ def cmd_resume(args):
 
     if not rest:
         if tool == "claude":
-            os.execvp("claude", ["claude", "--resume"])
+            exec_or_die(["claude", "--resume"])
         elif tool == "codex":
-            os.execvp("codex", ["codex", "resume"])
+            exec_or_die(["codex", "resume"])
         else:
-            os.execvp("kimi", ["kimi", "-S"])
+            exec_or_die(["kimi", "-S"])
         return
 
     prefix, extra = rest[0], rest[1:]
@@ -325,11 +362,11 @@ def cmd_resume(args):
         sys.exit(1)
 
     if tool == "claude":
-        os.execvp("claude", ["claude", "--resume", full_id, *extra])
+        exec_or_die(["claude", "--resume", full_id, *extra])
     elif tool == "codex":
-        os.execvp("codex", ["codex", "resume", full_id, *extra])
+        exec_or_die(["codex", "resume", full_id, *extra])
     else:
-        os.execvp("kimi", ["kimi", "-S", full_id, *extra])
+        exec_or_die(["kimi", "-S", full_id, *extra])
 
 
 def main():

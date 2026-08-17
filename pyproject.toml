@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aimux-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Unified CLI wrapper + cross-tool session manager for Claude Code, Codex CLI, and Kimi CLI"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -16,6 +16,9 @@ classifiers = [
     "Operating System :: POSIX",
     "Environment :: Console",
 ]
+
+[project.optional-dependencies]
+test = ["pytest"]
 
 [project.urls]
 Homepage = "https://github.com/uhuntu/aimux"

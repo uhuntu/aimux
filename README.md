@@ -1,5 +1,7 @@
 # aimux
 
+[![test](https://github.com/uhuntu/aimux/actions/workflows/test.yml/badge.svg)](https://github.com/uhuntu/aimux/actions/workflows/test.yml)
+
 A tiny, dependency-free wrapper that unifies three AI coding-agent CLIs — [Claude Code](https://claude.com/product/claude-code), [OpenAI Codex CLI](https://github.com/openai/codex), and [Kimi CLI](https://www.kimi-cli.com/) — behind one set of flags, plus a cross-tool session list and resume.
 
 No daemon, no config file, no build step — just a small Python package (`src/aimux/`) that reads each tool's own on-disk session store directly.
@@ -60,7 +62,14 @@ Anything after a literal `--`, or any flag this wrapper doesn't recognize, passe
 - **codex**: `~/.codex/session_index.jsonl` + `~/.codex/sessions/**/*.jsonl` for cwd lookup
 - **kimi**: `~/.kimi-code/session_index.jsonl` + each session's `state.json` / `agents/main/wire.jsonl`
 
-Titles are best-effort (scanned from the first user message / prompt in each session's log), and claude's displayed cwd is decoded from its project-directory name, so treat both as approximate.
+Titles are best-effort (scanned from the first user message / prompt in each session's log). Claude's cwd is read from the session content itself when available, falling back to a guess decoded from the project-directory name only if that's missing.
+
+## Development
+
+```bash
+pip install -e ".[test]"
+pytest tests/ -v
+```
 
 ## What this isn't
 
