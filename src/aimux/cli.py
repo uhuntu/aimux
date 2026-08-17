@@ -9,7 +9,7 @@ from . import __version__, sessions, update
 USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
        ai sessions [--tool T] [--limit N] [--cwd] [--all]
        ai resume <claude|codex|kimi> [session-id-or-prefix]
-       ai update
+       ai update [tools|all]
 
 Common options (translated per-tool, all optional):
   -p, --print              Non-interactive: print response and exit
@@ -34,7 +34,9 @@ Examples:
   ai claude -- --agent reviewer "look at this diff"
   ai sessions --limit 10
   ai resume kimi 97946bc7
-  ai update
+  ai update           # update aimux itself
+  ai update tools     # update claude, codex, and kimi (whichever are installed)
+  ai update all       # both of the above
 """
 
 TOOLS = ("claude", "codex", "kimi")

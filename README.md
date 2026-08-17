@@ -34,12 +34,16 @@ Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only 
 ## Update
 
 ```bash
-ai update
+ai update        # update aimux itself
+ai update tools  # update claude, codex, and kimi (whichever are installed)
+ai update all    # both
 ```
 
-Detects how it was installed and does the right thing: `git pull --ff-only` for a curl/git install, `pip install --upgrade aimux-cli` for a pip install.
+`ai update` detects how aimux itself was installed and does the right thing: `git pull --ff-only` for a curl/git install, `pip install --upgrade aimux-cli` for a pip install.
 
-Equivalent manual commands, if you'd rather:
+`ai update tools` runs each CLI's own update command (`claude update`, `codex update`, `kimi update`), skipping any that aren't installed. If one fails, the others still run; the exit code reflects the worst failure.
+
+Equivalent manual commands for updating aimux itself, if you'd rather:
 
 - **pip**: `pip install --upgrade aimux-cli`
 - **curl**: re-run the same one-liner — it fast-forwards the existing clone before relinking

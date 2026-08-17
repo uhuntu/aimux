@@ -83,3 +83,107 @@ def test_cmd_update_rejects_extra_arguments(capsys):
         update.cmd_update(["--bogus"])
     assert exc_info.value.code == 1
     assert "unexpected argument" in capsys.readouterr().err
+
+
+# ---------- update_tools ----------
+
+def test_update_tools_skips_missing_binaries(monkeypatch, capsys):
+    monkeypatch.setattr(update.shutil, "which", lambda _tool: None)
+    calls = []
+    monkeypatch.setattr(update.subprocess, "run", lambda argv, **kw: calls.append(argv))
+
+    assert update.update_tools() == 0
+    assert calls == []
+    out = capsys.readouterr().out
+    assert "claude: not installed, skipping" in out
+    assert "codex: not installed, skipping" in out
+    assert "kimi: not installed, skipping" in out
+
+
+def test_update_tools_runs_each_installed_tools_update_command(monkeypatch):
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+    calls = []
+
+    class FakeResult:
+        returncode = 0
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return FakeResult()
+
+    monkeypatch.setattr(update.subprocess, "run", fake_run)
+
+    assert update.update_tools() == 0
+    assert calls == [["claude", "update"], ["codex", "update"], ["kimi", "update"]]
+
+
+def test_update_tools_reports_worst_exit_code_but_keeps_going(monkeypatch):
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class FakeResult:
+        def __init__(self, code):
+            self.returncode = code
+
+    codes = {"claude": 0, "codex": 3, "kimi": 0}
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv)
+        return FakeResult(codes[argv[0]])
+
+    monkeypatch.setattr(update.subprocess, "run", fake_run)
+
+    assert update.update_tools() == 3
+    # all three still ran despite codex failing
+    assert len(calls) == 3
+
+
+# ---------- cmd_update dispatch modes ----------
+
+def test_cmd_update_tools_mode_only_updates_tools(monkeypatch):
+    self_calls = []
+    tools_calls = []
+    monkeypatch.setattr(update, "update_self", lambda: self_calls.append(1) or 0)
+    monkeypatch.setattr(update, "update_tools", lambda: tools_calls.append(1) or 0)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update.cmd_update(["tools"])
+
+    assert exc_info.value.code == 0
+    assert self_calls == []
+    assert tools_calls == [1]
+
+
+def test_cmd_update_all_mode_updates_both(monkeypatch):
+    self_calls = []
+    tools_calls = []
+    monkeypatch.setattr(update, "update_self", lambda: self_calls.append(1) or 0)
+    monkeypatch.setattr(update, "update_tools", lambda: tools_calls.append(1) or 0)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update.cmd_update(["all"])
+
+    assert exc_info.value.code == 0
+    assert self_calls == [1]
+    assert tools_calls == [1]
+
+
+def test_cmd_update_bare_mode_only_updates_self(monkeypatch):
+    self_calls = []
+    tools_calls = []
+    monkeypatch.setattr(update, "update_self", lambda: self_calls.append(1) or 0)
+    monkeypatch.setattr(update, "update_tools", lambda: tools_calls.append(1) or 0)
+
+    with pytest.raises(SystemExit) as exc_info:
+        update.cmd_update([])
+
+    assert exc_info.value.code == 0
+    assert self_calls == [1]
+    assert tools_calls == []
+
+
+def test_cmd_update_rejects_unknown_target(capsys):
+    with pytest.raises(SystemExit) as exc_info:
+        update.cmd_update(["bogus"])
+    assert exc_info.value.code == 1
+    assert "unexpected argument" in capsys.readouterr().err
