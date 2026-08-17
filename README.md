@@ -8,9 +8,10 @@ No daemon, no config file, no build step. Two POSIX-ish scripts (`bin/ai` in Bas
 
 ```bash
 git clone https://github.com/uhuntu/aimux.git
-ln -s "$(pwd)/aimux/bin/ai" ~/.local/bin/ai
-ln -s "$(pwd)/aimux/bin/ai-sessions" ~/.local/bin/ai-sessions
+cd aimux && ./install.sh
 ```
+
+That symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir ./install.sh`). Nothing is copied — the repo stays the source of truth, so `git pull` picks up updates immediately.
 
 Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only the ones you actually use need to be present).
 
