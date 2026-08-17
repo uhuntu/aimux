@@ -33,9 +33,17 @@ Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only 
 
 ## Update
 
+```bash
+ai update
+```
+
+Detects how it was installed and does the right thing: `git pull --ff-only` for a curl/git install, `pip install --upgrade aimux-cli` for a pip install.
+
+Equivalent manual commands, if you'd rather:
+
 - **pip**: `pip install --upgrade aimux-cli`
-- **curl**: re-run the same one-liner — it fast-forwards the existing clone (`git pull --ff-only`) before relinking
-- **git**: `git -C /path/to/aimux pull` — the symlinks point straight into the repo, so this alone is enough; no need to re-run `install.sh`
+- **curl**: re-run the same one-liner — it fast-forwards the existing clone before relinking
+- **git**: `git -C /path/to/aimux pull` — the symlinks point straight into the repo, so this alone is enough
 
 ## Usage
 

@@ -4,11 +4,12 @@ everything else straight through.
 """
 import sys
 
-from . import __version__, sessions
+from . import __version__, sessions, update
 
 USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
        ai sessions [--tool T] [--limit N] [--cwd] [--all]
        ai resume <claude|codex|kimi> [session-id-or-prefix]
+       ai update
 
 Common options (translated per-tool, all optional):
   -p, --print              Non-interactive: print response and exit
@@ -33,6 +34,7 @@ Examples:
   ai claude -- --agent reviewer "look at this diff"
   ai sessions --limit 10
   ai resume kimi 97946bc7
+  ai update
 """
 
 TOOLS = ("claude", "codex", "kimi")
@@ -49,7 +51,7 @@ def build_command(tool, rest):
     command to run. Pure function, no I/O — raises UsageError on bad
     input instead of exiting, so it's easy to unit test."""
     if tool not in TOOLS:
-        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume)")
+        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume/update)")
 
     print_ = False
     continue_session = False
@@ -151,6 +153,9 @@ def main():
         return
     if tool == "resume":
         sessions.cmd_resume(rest)
+        return
+    if tool == "update":
+        update.cmd_update(rest)
         return
 
     try:
