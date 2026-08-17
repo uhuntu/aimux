@@ -14,14 +14,20 @@ No daemon, no config file, no build step — just a small Python package (`src/a
 pip install aimux-cli
 ```
 
-**Via git**, if you'd rather not touch PyPI:
+**Via curl**, one line, no manual clone:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/uhuntu/aimux/master/install.sh | bash
+```
+
+**Via git**, if you'd rather clone it yourself first:
 
 ```bash
 git clone https://github.com/uhuntu/aimux.git
 cd aimux && ./install.sh
 ```
 
-That symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir ./install.sh`). Nothing is copied — the repo stays the source of truth, so `git pull` picks up updates immediately.
+Either of the last two symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir`). The curl form clones the repo to `~/.local/share/aimux` first (override with `AIMUX_REPO_DIR`). Nothing is copied — the clone stays the source of truth, so `git -C ~/.local/share/aimux pull` (or re-running the curl command) picks up updates.
 
 Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only the ones you actually use need to be present).
 

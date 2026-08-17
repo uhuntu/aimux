@@ -1,11 +1,33 @@
 #!/usr/bin/env bash
 # Symlinks aimux's commands (ai, ai-sessions, plus optional short aliases)
-# into a directory on your PATH. Run after cloning:
+# into a directory on your PATH.
+#
+# Run after cloning:
 #   ./install.sh
+#
+# Or as a one-liner, which clones the repo first:
+#   curl -fsSL https://raw.githubusercontent.com/uhuntu/aimux/master/install.sh | bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_URL="https://github.com/uhuntu/aimux.git"
 BIN_DIR="${AIMUX_BIN_DIR:-$HOME/.local/bin}"
+
+# When piped via `curl | bash`, there's no script file, so BASH_SOURCE[0] is
+# unset (not just non-matching) -- guard the lookup instead of dereferencing
+# it directly under `set -u`.
+SOURCE_PATH="${BASH_SOURCE[0]:-}"
+if [[ -n "$SOURCE_PATH" && -f "$(dirname "$SOURCE_PATH")/bin/ai" ]]; then
+  SCRIPT_DIR="$(cd "$(dirname "$SOURCE_PATH")" && pwd)"
+else
+  # Not running from inside a clone -- fetch one first, then re-run from there.
+  REPO_DIR="${AIMUX_REPO_DIR:-$HOME/.local/share/aimux}"
+  if [[ -d "$REPO_DIR/.git" ]]; then
+    git -C "$REPO_DIR" pull --ff-only
+  else
+    git clone --depth 1 "$REPO_URL" "$REPO_DIR"
+  fi
+  exec "$REPO_DIR/install.sh"
+fi
 
 mkdir -p "$BIN_DIR"
 
