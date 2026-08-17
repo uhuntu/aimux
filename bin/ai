@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+# ai - unified wrapper for claude / codex / kimi CLIs.
+# Normalizes a handful of common flags across the three tools and passes
+# everything else straight through.
+set -euo pipefail
+
+usage() {
+  cat <<'EOF'
+Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
+       ai sessions [--tool T] [--limit N] [--cwd] [--all]
+       ai resume <claude|codex|kimi> [session-id-or-prefix]
+
+Common options (translated per-tool, all optional):
+  -p, --print              Non-interactive: print response and exit
+  -c, --continue           Continue the most recent session in this directory
+  -m, --model <model>      Model to use
+  --add-dir <dir>          Additional workspace directory (repeatable)
+  -y, --yolo               Auto-approve tool calls (per-tool semantics differ,
+                            see notes below)
+
+Anything after a literal `--`, or any flag this wrapper doesn't recognize,
+is passed through unchanged to the underlying CLI.
+
+Per-tool --yolo mapping:
+  claude  -> --dangerously-skip-permissions
+  codex   -> --approve-for-me   (auto-approve, still sandboxed)
+  kimi    -> -y/--yolo
+
+Examples:
+  ai claude -p "summarize this repo"
+  ai codex -p -m o3 "fix the failing test"
+  ai kimi -c
+  ai claude -- --agent reviewer "look at this diff"
+  ai sessions --limit 10
+  ai resume kimi 97946bc7
+EOF
+}
+
+TOOL="${1:-}"
+if [[ "$TOOL" == "-h" || "$TOOL" == "--help" ]]; then
+  usage
+  exit 0
+fi
+if [[ -z "$TOOL" ]]; then
+  exec ai-sessions list --limit 15
+fi
+shift
+
+case "$TOOL" in
+  sessions) exec ai-sessions list "$@" ;;
+  resume) exec ai-sessions resume "$@" ;;
+esac
+
+case "$TOOL" in
+  claude|codex|kimi) ;;
+  *)
+    echo "ai: unknown tool '$TOOL' (expected claude, codex, or kimi, or sessions/resume)" >&2
+    exit 1
+    ;;
+esac
+
+print=false
+continue_session=false
+model=""
+add_dirs=()
+yolo=false
+rest=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -p|--print) print=true; shift ;;
+    -c|--continue) continue_session=true; shift ;;
+    -m|--model) model="${2:?--model requires a value}"; shift 2 ;;
+    --add-dir) add_dirs+=("${2:?--add-dir requires a value}"); shift 2 ;;
+    -y|--yolo) yolo=true; shift ;;
+    --) shift; rest+=("$@"); break ;;
+    *) rest+=("$1"); shift ;;
+  esac
+done
+
+cmd=()
+
+case "$TOOL" in
+  claude)
+    cmd=(claude)
+    $print && cmd+=(-p)
+    $continue_session && cmd+=(--continue)
+    [[ -n "$model" ]] && cmd+=(--model "$model")
+    for d in "${add_dirs[@]:-}"; do [[ -n "$d" ]] && cmd+=(--add-dir "$d"); done
+    $yolo && cmd+=(--dangerously-skip-permissions)
+    cmd+=("${rest[@]}")
+    ;;
+  codex)
+    if $print; then
+      cmd=(codex exec)
+      $continue_session && cmd+=(resume --last)
+    else
+      cmd=(codex)
+    fi
+    [[ -n "$model" ]] && cmd+=(-m "$model")
+    for d in "${add_dirs[@]:-}"; do [[ -n "$d" ]] && cmd+=(--add-dir "$d"); done
+    $yolo && cmd+=(--approve-for-me)
+    cmd+=("${rest[@]}")
+    ;;
+  kimi)
+    cmd=(kimi)
+    $print && cmd+=(-p)
+    $continue_session && cmd+=(-c)
+    [[ -n "$model" ]] && cmd+=(-m "$model")
+    for d in "${add_dirs[@]:-}"; do [[ -n "$d" ]] && cmd+=(--add-dir "$d"); done
+    $yolo && cmd+=(-y)
+    cmd+=("${rest[@]}")
+    ;;
+esac
+
+exec "${cmd[@]}"
