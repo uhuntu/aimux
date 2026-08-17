@@ -2,9 +2,17 @@
 
 A tiny, dependency-free wrapper that unifies three AI coding-agent CLIs — [Claude Code](https://claude.com/product/claude-code), [OpenAI Codex CLI](https://github.com/openai/codex), and [Kimi CLI](https://www.kimi-cli.com/) — behind one set of flags, plus a cross-tool session list and resume.
 
-No daemon, no config file, no build step. Two POSIX-ish scripts (`bin/ai` in Bash, `bin/ai-sessions` in Python 3) that read each tool's own on-disk session store directly.
+No daemon, no config file, no build step — just a small Python package (`src/aimux/`) that reads each tool's own on-disk session store directly.
 
 ## Install
+
+**Via pip** (the package is named `aimux-cli` on PyPI; the commands installed are `ai`, `aim`, `aimux`, `ai-sessions`):
+
+```bash
+pip install aimux-cli
+```
+
+**Via git**, if you'd rather not touch PyPI:
 
 ```bash
 git clone https://github.com/uhuntu/aimux.git

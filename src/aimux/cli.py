@@ -1,0 +1,148 @@
+"""ai - unified wrapper for claude / codex / kimi CLIs.
+Normalizes a handful of common flags across the three tools and passes
+everything else straight through.
+"""
+import os
+import sys
+
+from . import sessions
+
+USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
+       ai sessions [--tool T] [--limit N] [--cwd] [--all]
+       ai resume <claude|codex|kimi> [session-id-or-prefix]
+
+Common options (translated per-tool, all optional):
+  -p, --print              Non-interactive: print response and exit
+  -c, --continue           Continue the most recent session in this directory
+  -m, --model <model>      Model to use
+  --add-dir <dir>          Additional workspace directory (repeatable)
+  -y, --yolo               Auto-approve tool calls (per-tool semantics differ,
+                            see notes below)
+
+Anything after a literal `--`, or any flag this wrapper doesn't recognize,
+is passed through unchanged to the underlying CLI.
+
+Per-tool --yolo mapping:
+  claude  -> --dangerously-skip-permissions
+  codex   -> --approve-for-me   (auto-approve, still sandboxed)
+  kimi    -> -y/--yolo
+
+Examples:
+  ai claude -p "summarize this repo"
+  ai codex -p -m o3 "fix the failing test"
+  ai kimi -c
+  ai claude -- --agent reviewer "look at this diff"
+  ai sessions --limit 10
+  ai resume kimi 97946bc7
+"""
+
+TOOLS = ("claude", "codex", "kimi")
+
+
+def main():
+    argv = sys.argv[1:]
+
+    if argv and argv[0] in ("-h", "--help"):
+        print(USAGE)
+        return
+
+    if not argv:
+        sessions.cmd_list(["--limit", "15"])
+        return
+
+    tool, rest = argv[0], argv[1:]
+
+    if tool == "sessions":
+        sessions.cmd_list(rest)
+        return
+    if tool == "resume":
+        sessions.cmd_resume(rest)
+        return
+
+    if tool not in TOOLS:
+        print(f"ai: unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume)", file=sys.stderr)
+        sys.exit(1)
+
+    print_ = False
+    continue_session = False
+    model = None
+    add_dirs = []
+    yolo = False
+    trailing = []
+
+    i = 0
+    while i < len(rest):
+        a = rest[i]
+        if a in ("-p", "--print"):
+            print_ = True
+            i += 1
+        elif a in ("-c", "--continue"):
+            continue_session = True
+            i += 1
+        elif a in ("-m", "--model"):
+            if i + 1 >= len(rest):
+                print("ai: --model requires a value", file=sys.stderr)
+                sys.exit(1)
+            model = rest[i + 1]
+            i += 2
+        elif a == "--add-dir":
+            if i + 1 >= len(rest):
+                print("ai: --add-dir requires a value", file=sys.stderr)
+                sys.exit(1)
+            add_dirs.append(rest[i + 1])
+            i += 2
+        elif a in ("-y", "--yolo"):
+            yolo = True
+            i += 1
+        elif a == "--":
+            trailing.extend(rest[i + 1:])
+            break
+        else:
+            trailing.append(a)
+            i += 1
+
+    cmd = []
+    if tool == "claude":
+        cmd = ["claude"]
+        if print_:
+            cmd.append("-p")
+        if continue_session:
+            cmd.append("--continue")
+        if model:
+            cmd += ["--model", model]
+        for d in add_dirs:
+            cmd += ["--add-dir", d]
+        if yolo:
+            cmd.append("--dangerously-skip-permissions")
+    elif tool == "codex":
+        if print_:
+            cmd = ["codex", "exec"]
+            if continue_session:
+                cmd += ["resume", "--last"]
+        else:
+            cmd = ["codex"]
+        if model:
+            cmd += ["-m", model]
+        for d in add_dirs:
+            cmd += ["--add-dir", d]
+        if yolo:
+            cmd.append("--approve-for-me")
+    else:  # kimi
+        cmd = ["kimi"]
+        if print_:
+            cmd.append("-p")
+        if continue_session:
+            cmd.append("-c")
+        if model:
+            cmd += ["-m", model]
+        for d in add_dirs:
+            cmd += ["--add-dir", d]
+        if yolo:
+            cmd.append("-y")
+
+    cmd += trailing
+    os.execvp(cmd[0], cmd)
+
+
+if __name__ == "__main__":
+    main()

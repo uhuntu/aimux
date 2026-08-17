@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aimux-cli"
+version = "0.1.0"
+description = "Unified CLI wrapper + cross-tool session manager for Claude Code, Codex CLI, and Kimi CLI"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Hunt Lin", email = "uhuntu@gmail.com" }]
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX",
+    "Environment :: Console",
+]
+
+[project.urls]
+Homepage = "https://github.com/uhuntu/aimux"
+Repository = "https://github.com/uhuntu/aimux"
+
+[project.scripts]
+ai = "aimux.cli:main"
+aim = "aimux.cli:main"
+aimux = "aimux.cli:main"
+ai-sessions = "aimux.sessions:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
