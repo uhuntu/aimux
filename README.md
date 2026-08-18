@@ -6,6 +6,8 @@ A tiny, dependency-free wrapper that unifies three AI coding-agent CLIs — [Cla
 
 No daemon, no config file, no build step — just a small Python package (`src/aimux/`) that reads each tool's own on-disk session store directly.
 
+![aimux demo: a unified session list across claude/codex/kimi, then an LLM-judged topic search narrowing it down to the one relevant session](assets/demo.gif)
+
 ## Install
 
 **Via pip** (the package is named `aimux-cli` on PyPI; the commands installed are `ai`, `aim`, `aimux`, `ai-sessions`):
