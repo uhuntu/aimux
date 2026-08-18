@@ -97,15 +97,15 @@ def claude_light_records():
     return list(by_id.values())
 
 
-def extract_text_from_content(content):
-    """A claude/kimi message's content is either a plain string or a list
-    of typed blocks (text, image, ...); pull the first text block either
-    way, or None."""
+def extract_text_from_content(content, text_types=("text",)):
+    """A message's content is either a plain string or a list of typed
+    blocks (text, image, ...); pull the first matching text block either
+    way, or None. codex uses "input_text" instead of "text"."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
         for block in content:
-            if isinstance(block, dict) and block.get("type") == "text":
+            if isinstance(block, dict) and block.get("type") in text_types:
                 return block.get("text")
     return None
 
@@ -177,12 +177,12 @@ def codex_index():
     return list(read_jsonl(path))
 
 
-def codex_light_records():
+def codex_thread_names():
     # codex appends a new session_index.jsonl line each time a thread gets
-    # auto-renamed, without removing the stale line for the same id -- so
-    # the same session can appear multiple times here. Keep only the most
-    # recently updated line per id.
-    by_id = {}
+    # auto-renamed, without removing the stale line for the same id -- keep
+    # only the most recently updated name per id.
+    names = {}
+    ts_seen = {}
     for entry in codex_index():
         sid = entry.get("id")
         if not sid:
@@ -194,28 +194,90 @@ def codex_light_records():
             ts = calendar.timegm(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))
         except Exception:
             ts = 0
-        if sid in by_id and by_id[sid]["ts"] >= ts:
+        if sid in ts_seen and ts_seen[sid] >= ts:
             continue
-        by_id[sid] = {
-            "tool": "codex", "id": sid, "ts": ts,
-            "title": entry.get("thread_name") or "(no title)",
-        }
-    return list(by_id.values())
+        ts_seen[sid] = ts
+        names[sid] = entry.get("thread_name")
+    return names
 
 
 _codex_path_index = None
 
 
-def codex_rollout_path(sid):
+def build_codex_path_index():
     global _codex_path_index
-    if _codex_path_index is None:
-        _codex_path_index = {}
-        sessions_dir = os.path.join(CODEX_HOME, "sessions")
-        for path in glob.glob(os.path.join(sessions_dir, "**", "*.jsonl"), recursive=True):
-            m = UUID_RE.search(os.path.basename(path))
-            if m:
-                _codex_path_index[m.group(0)] = path
-    return _codex_path_index.get(sid)
+    _codex_path_index = {}
+    sessions_dir = os.path.join(CODEX_HOME, "sessions")
+    for path in glob.glob(os.path.join(sessions_dir, "**", "*.jsonl"), recursive=True):
+        m = UUID_RE.search(os.path.basename(path))
+        if m:
+            _codex_path_index[m.group(0)] = path
+    return _codex_path_index
+
+
+def codex_rollout_path(sid):
+    index = _codex_path_index if _codex_path_index is not None else build_codex_path_index()
+    return index.get(sid)
+
+
+def codex_light_records():
+    # session_index.jsonl is only reliably populated by the bare CLI's own
+    # terminal/exec-mode session tracking -- sessions created via other
+    # integrations (VSCode, Codex Desktop) use a different session store
+    # entirely and never appear there, even though their rollout files
+    # exist on disk same as any other session. So scan the rollout files
+    # directly (the same source of truth claude/kimi already use), and use
+    # session_index.jsonl only to borrow a nicer auto-generated title when
+    # one happens to be available for that id.
+    thread_names = codex_thread_names()
+    path_index = build_codex_path_index()
+
+    by_id = {}
+    for sid, path in path_index.items():
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            continue
+        if sid in by_id and by_id[sid]["ts"] >= mtime:
+            continue
+        by_id[sid] = {"tool": "codex", "id": sid, "ts": mtime, "title": thread_names.get(sid)}
+    return list(by_id.values())
+
+
+def codex_rollout_title(sid):
+    """Fallback title for sessions with no session_index.jsonl entry:
+    scan the rollout file itself for the first genuine user message,
+    skipping injected boilerplate (AGENTS.md instructions, permission
+    setup, skill lists) rather than surfacing that as the "title"."""
+    path = codex_rollout_path(sid)
+    if not path:
+        return "(no title)"
+    try:
+        with open(path) as fh:
+            for i, line in enumerate(fh):
+                if i > 30:
+                    break
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") != "response_item":
+                    continue
+                payload = d.get("payload", {})
+                if payload.get("type") != "message" or payload.get("role") != "user":
+                    continue
+                text = extract_text_from_content(payload.get("content"), text_types=("input_text", "text"))
+                if not text:
+                    continue
+                stripped = text.strip()
+                if len(stripped) > 1000 or stripped.startswith((
+                    "# AGENTS.md", "<permissions", "<INSTRUCTIONS>", "<user_instructions>", "<environment_context>",
+                )):
+                    continue
+                return stripped.replace("\n", " ")[:70]
+    except FileNotFoundError:
+        pass
+    return "(no title)"
 
 
 def codex_cwd(sid):
@@ -230,7 +292,9 @@ def codex_cwd(sid):
 
 
 def codex_resolve(prefix):
-    return sorted({e["id"] for e in codex_index() if e.get("id", "").startswith(prefix)})
+    ids = {sid for sid in codex_thread_names() if sid.startswith(prefix)}
+    ids |= {sid for sid in build_codex_path_index() if sid.startswith(prefix)}
+    return sorted(ids)
 
 
 # ---------- kimi ----------
@@ -425,7 +489,7 @@ def resolve_row(r):
         title, cwd_resolved = claude_title_and_cwd(r["path"], r.get("cwd"))
         cwd_show = cwd_resolved or "?"
     elif tool == "codex":
-        title = r.get("title", "(no title)")
+        title = r.get("title") or codex_rollout_title(r["id"])
         cwd_show = codex_cwd(r["id"]) or "?"
     else:
         title = kimi_title(r["dir"])

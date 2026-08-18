@@ -37,7 +37,7 @@ def snippet_for(r):
     if tool == "claude":
         return sessions.claude_snippet(r["path"])
     if tool == "codex":
-        return r.get("title", "(no title)")
+        return r.get("title") or sessions.codex_rollout_title(r["id"])
     return sessions.kimi_snippet(r["dir"])
 
 

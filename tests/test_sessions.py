@@ -7,6 +7,41 @@ import pytest
 from aimux import sessions
 
 
+@pytest.fixture(autouse=True)
+def _reset_codex_path_cache():
+    # codex_rollout_path() lazily caches sessions.CODEX_HOME's rollout file
+    # listing in a module-level global; reset it around every test so one
+    # test's tmp_path can't leak into another's.
+    sessions._codex_path_index = None
+    yield
+    sessions._codex_path_index = None
+
+
+def write_codex_rollout(codex_home, sid, cwd=None, user_text=None, mtime=None):
+    """Create a minimal codex rollout file, the actual on-disk source of
+    truth codex_light_records() now scans directly (session_index.jsonl is
+    only an optional title-enrichment source, not guaranteed to exist)."""
+    day_dir = codex_home / "sessions" / "2026" / "08" / "14"
+    day_dir.mkdir(parents=True, exist_ok=True)
+    path = day_dir / f"rollout-2026-08-14T00-00-00-{sid}.jsonl"
+    lines = [json.dumps({
+        "timestamp": "2026-08-14T00:00:00.000Z", "type": "session_meta",
+        "payload": {"id": sid, "cwd": cwd},
+    })]
+    if user_text is not None:
+        lines.append(json.dumps({
+            "type": "response_item",
+            "payload": {
+                "type": "message", "role": "user",
+                "content": [{"type": "input_text", "text": user_text}],
+            },
+        }))
+    path.write_text("\n".join(lines) + "\n")
+    if mtime is not None:
+        os.utime(path, (mtime, mtime))
+    return path
+
+
 # ---------- relative_time ----------
 
 @pytest.mark.parametrize(
@@ -32,33 +67,15 @@ def test_relative_time_missing_ts():
 
 # ---------- codex ----------
 
-def test_codex_timestamp_parsed_as_utc_not_local(monkeypatch, tmp_path):
-    """Regression test: updated_at is UTC ("...Z"); the parser must not
-    reinterpret it as local time (previously off by the local UTC offset)."""
-    codex_home = tmp_path / ".codex"
-    codex_home.mkdir()
-    index = codex_home / "session_index.jsonl"
-    index.write_text(json.dumps({
-        "id": "019ff51f-9ace-7e03-88bc-a782a5fcd9ab",
-        "thread_name": "Find isnfcon",
-        "updated_at": "2026-08-12T08:38:53.111355365Z",
-    }) + "\n")
-    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
-
-    recs = sessions.codex_light_records()
-    assert len(recs) == 1
-    # Correct UTC epoch for 2026-08-12T08:38:53Z, independent of local TZ.
-    assert recs[0]["ts"] == 1786523933
-
-
-def test_codex_light_records_dedupes_reindexed_thread_rename(monkeypatch, tmp_path):
+def test_codex_thread_names_dedupes_reindexed_thread_rename_uses_utc(monkeypatch, tmp_path):
     """Regression test: codex appends a new session_index.jsonl line each
     time a thread gets auto-renamed, without removing the stale line for
-    the same id. Only the most recently updated line should survive."""
+    the same id, and updated_at is UTC ("...Z") -- timegm (not mktime, which
+    would reinterpret it as local time) must be used so the *later* rename
+    always wins regardless of local TZ."""
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
-    index = codex_home / "session_index.jsonl"
-    index.write_text(
+    (codex_home / "session_index.jsonl").write_text(
         json.dumps({
             "id": "019f5f6e-a0d0-71e0-9463-8158f339b400",
             "thread_name": "Understand current project",
@@ -72,9 +89,110 @@ def test_codex_light_records_dedupes_reindexed_thread_rename(monkeypatch, tmp_pa
     )
     monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
 
+    assert sessions.codex_thread_names() == {
+        "019f5f6e-a0d0-71e0-9463-8158f339b400": "Understand current project (2)",
+    }
+
+
+def test_codex_light_records_finds_sessions_with_no_index_entry(monkeypatch, tmp_path):
+    """Regression test: session_index.jsonl is only populated by the bare
+    CLI's own terminal/exec-mode session tracking. Sessions created via
+    other integrations (VSCode, Codex Desktop) use an entirely different
+    session store and never get an entry there, even though their rollout
+    file exists on disk same as any other session -- codex_light_records
+    must still find them by scanning ~/.codex/sessions directly, not by
+    relying on session_index.jsonl (which may not even exist)."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    # deliberately no session_index.jsonl at all
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    write_codex_rollout(codex_home, sid, cwd="/data/hunt/work", user_text="fix the login crash")
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
     recs = sessions.codex_light_records()
     assert len(recs) == 1
-    assert recs[0]["title"] == "Understand current project (2)"
+    assert recs[0]["id"] == sid
+    assert recs[0]["title"] is None  # no thread_name -- resolve_row falls back to codex_rollout_title
+    assert recs[0]["ts"] > 0
+
+
+def test_codex_light_records_prefers_index_title_when_available(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    write_codex_rollout(codex_home, sid, cwd="/data/hunt/work")
+    (codex_home / "session_index.jsonl").write_text(json.dumps({
+        "id": sid, "thread_name": "Fix login crash", "updated_at": "2026-08-14T00:00:00Z",
+    }) + "\n")
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    recs = sessions.codex_light_records()
+    assert recs[0]["title"] == "Fix login crash"
+
+
+def test_codex_rollout_title_skips_injected_boilerplate(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    day_dir = codex_home / "sessions" / "2026" / "08" / "14"
+    day_dir.mkdir(parents=True)
+    path = day_dir / f"rollout-2026-08-14T00-00-00-{sid}.jsonl"
+    path.write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": sid, "cwd": "/x"}}) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "developer",
+                        "content": [{"type": "input_text", "text": "<permissions instructions>..."}]},
+        }) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user",
+                        "content": [{"type": "input_text", "text": "# AGENTS.md instructions for /x\n..."}]},
+        }) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user",
+                        "content": [{"type": "input_text", "text": "<environment_context>\n  <cwd>/x</cwd>\n..."}]},
+        }) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user",
+                        "content": [{"type": "input_text", "text": "please fix the login crash"}]},
+        }) + "\n"
+    )
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    assert sessions.codex_rollout_title(sid) == "please fix the login crash"
+
+
+def test_codex_rollout_title_missing_session_returns_placeholder(monkeypatch, tmp_path):
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(tmp_path / ".codex"))
+    assert sessions.codex_rollout_title("no-such-id") == "(no title)"
+
+
+def test_codex_resolve_finds_rollout_only_sessions(monkeypatch, tmp_path):
+    """codex_resolve must find sessions that only exist as rollout files,
+    not just ones present in session_index.jsonl (which may not exist)."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    write_codex_rollout(codex_home, sid, cwd="/x")
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    assert sessions.codex_resolve("019ffdbe") == [sid]
+
+
+def test_resolve_row_codex_falls_back_to_rollout_title_and_cwd(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    write_codex_rollout(codex_home, sid, cwd="/data/hunt/work", user_text="fix login crash")
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    recs = sessions.codex_light_records()
+    row = sessions.resolve_row(recs[0])
+    assert row[5] == "fix login crash"  # title
+    assert row[4] == "/data/hunt/work"  # cwd
 
 
 def test_codex_resolve_prefix_match(monkeypatch, tmp_path):
@@ -405,11 +523,8 @@ def test_cmd_list_rejects_dangling_flag(capsys):
 def test_cmd_list_limit_all_shows_everything(monkeypatch, tmp_path, capsys):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
-    lines = [
-        json.dumps({"id": f"0000000{i}-0000-0000-0000-00000000000{i}", "updated_at": "2026-01-01T00:00:00Z"})
-        for i in range(30)
-    ]
-    (codex_home / "session_index.jsonl").write_text("\n".join(lines) + "\n")
+    for i in range(30):
+        write_codex_rollout(codex_home, f"0000000{i}-0000-0000-0000-00000000000{i}", cwd="/x", mtime=1000 + i)
     monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
     monkeypatch.setattr(sessions, "CLAUDE_PROJECTS", str(tmp_path / "no-claude"))
     monkeypatch.setattr(sessions, "KIMI_HOME", str(tmp_path / "no-kimi"))
