@@ -7,7 +7,8 @@ import sys
 from . import __version__, sessions, update
 
 USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
-       ai sessions [--tool T] [--limit N] [--cwd] [--all]
+       ai sessions [--tool T] [--limit N|all] [--cwd] [--all]
+       ai full [--tool T] [--cwd] [--all]
        ai resume <claude|codex|kimi|N> [session-id-or-prefix]
        ai update [tools|all]
 
@@ -33,6 +34,8 @@ Examples:
   ai kimi -c
   ai claude -- --agent reviewer "look at this diff"
   ai sessions --limit 10
+  ai sessions --limit all   # same as `ai full`
+  ai full                   # everything, no default 15-row cutoff
   ai resume kimi 97946bc7
   ai resume 3         # resume row 3 from the last `ai`/`ai sessions` listing
   ai update           # update aimux itself
@@ -54,7 +57,7 @@ def build_command(tool, rest):
     command to run. Pure function, no I/O — raises UsageError on bad
     input instead of exiting, so it's easy to unit test."""
     if tool not in TOOLS:
-        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/resume/update)")
+        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/full/resume/update)")
 
     print_ = False
     continue_session = False
@@ -153,6 +156,10 @@ def main():
 
     if tool == "sessions":
         sessions.cmd_list(rest)
+        return
+    if tool == "full":
+        # `ai full` is shorthand for `ai sessions --limit all`.
+        sessions.cmd_list(["--limit", "all", *rest])
         return
     if tool == "resume":
         sessions.cmd_resume(rest)

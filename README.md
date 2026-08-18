@@ -58,6 +58,8 @@ ai codex -p -m o3 "prompt"  # -> codex exec -m o3 "prompt"
 ai kimi -c                  # -> kimi -c
 
 ai sessions --limit 10      # list recent sessions, all tools
+ai sessions --limit all     # no cutoff -- same as `ai full`
+ai full                     # shorthand for `ai sessions --limit all`
 ai sessions --tool codex    # filter to one tool
 ai sessions --cwd           # only sessions started in the current directory
 ai sessions --all           # include archived sessions

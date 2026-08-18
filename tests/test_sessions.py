@@ -51,6 +51,32 @@ def test_codex_timestamp_parsed_as_utc_not_local(monkeypatch, tmp_path):
     assert recs[0]["ts"] == 1786523933
 
 
+def test_codex_light_records_dedupes_reindexed_thread_rename(monkeypatch, tmp_path):
+    """Regression test: codex appends a new session_index.jsonl line each
+    time a thread gets auto-renamed, without removing the stale line for
+    the same id. Only the most recently updated line should survive."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    index = codex_home / "session_index.jsonl"
+    index.write_text(
+        json.dumps({
+            "id": "019f5f6e-a0d0-71e0-9463-8158f339b400",
+            "thread_name": "Understand current project",
+            "updated_at": "2026-07-14T07:01:53.936145493Z",
+        }) + "\n"
+        + json.dumps({
+            "id": "019f5f6e-a0d0-71e0-9463-8158f339b400",
+            "thread_name": "Understand current project (2)",
+            "updated_at": "2026-07-14T07:01:55.450675466Z",
+        }) + "\n"
+    )
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    recs = sessions.codex_light_records()
+    assert len(recs) == 1
+    assert recs[0]["title"] == "Understand current project (2)"
+
+
 def test_codex_resolve_prefix_match(monkeypatch, tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -324,6 +350,25 @@ def test_cmd_list_rejects_dangling_flag(capsys):
     with pytest.raises(SystemExit):
         sessions.cmd_list(["--limit"])
     assert "requires a value" in capsys.readouterr().err
+
+
+def test_cmd_list_limit_all_shows_everything(monkeypatch, tmp_path, capsys):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    lines = [
+        json.dumps({"id": f"0000000{i}-0000-0000-0000-00000000000{i}", "updated_at": "2026-01-01T00:00:00Z"})
+        for i in range(30)
+    ]
+    (codex_home / "session_index.jsonl").write_text("\n".join(lines) + "\n")
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+    monkeypatch.setattr(sessions, "CLAUDE_PROJECTS", str(tmp_path / "no-claude"))
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(tmp_path / "no-kimi"))
+    monkeypatch.setattr(sessions, "LIST_CACHE_FILE", str(tmp_path / "cache" / "last_list.json"))
+
+    sessions.cmd_list(["--limit", "all"])
+
+    # header + 30 rows, comfortably more than the usual 20-row default
+    assert len(capsys.readouterr().out.splitlines()) == 31
 
 
 # ---------- exec_or_die ----------

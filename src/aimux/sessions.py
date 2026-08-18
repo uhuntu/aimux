@@ -150,7 +150,11 @@ def codex_index():
 
 
 def codex_light_records():
-    records = []
+    # codex appends a new session_index.jsonl line each time a thread gets
+    # auto-renamed, without removing the stale line for the same id -- so
+    # the same session can appear multiple times here. Keep only the most
+    # recently updated line per id.
+    by_id = {}
     for entry in codex_index():
         sid = entry.get("id")
         if not sid:
@@ -162,11 +166,13 @@ def codex_light_records():
             ts = calendar.timegm(time.strptime(updated[:19], "%Y-%m-%dT%H:%M:%S"))
         except Exception:
             ts = 0
-        records.append({
+        if sid in by_id and by_id[sid]["ts"] >= ts:
+            continue
+        by_id[sid] = {
             "tool": "codex", "id": sid, "ts": ts,
             "title": entry.get("thread_name") or "(no title)",
-        })
-    return records
+        }
+    return list(by_id.values())
 
 
 _codex_path_index = None
@@ -301,11 +307,14 @@ def cmd_list(args):
         a = args[i]
         if a == "--limit":
             raw = next_value(a, i)
-            try:
-                limit = int(raw)
-            except ValueError:
-                print(f"ai sessions: --limit expects a number, got '{raw}'", file=sys.stderr)
-                sys.exit(1)
+            if raw == "all":
+                limit = None
+            else:
+                try:
+                    limit = int(raw)
+                except ValueError:
+                    print(f"ai sessions: --limit expects a number or 'all', got '{raw}'", file=sys.stderr)
+                    sys.exit(1)
             i += 2
         elif a == "--tool":
             tool_filter = next_value(a, i)
