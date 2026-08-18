@@ -212,6 +212,23 @@ def kimi_index():
     return list(read_jsonl(path))
 
 
+def parse_kimi_timestamp(value):
+    """kimi-code's state.json has used two schemas over time: epoch
+    milliseconds (numeric, current) and ISO-8601 strings (older sessions,
+    e.g. "2026-07-20T01:49:19.177Z"). Handle both; returns seconds since
+    epoch, or 0 if missing/unparseable."""
+    if not value:
+        return 0
+    try:
+        return float(value) / 1000.0
+    except (TypeError, ValueError):
+        pass
+    try:
+        return calendar.timegm(time.strptime(str(value)[:19], "%Y-%m-%dT%H:%M:%S"))
+    except ValueError:
+        return 0
+
+
 def kimi_light_records(show_all):
     records = []
     for entry in kimi_index():
@@ -222,15 +239,11 @@ def kimi_light_records(show_all):
         state = read_json(os.path.join(sdir, "state.json")) or {}
         if state.get("archived") and not show_all:
             continue
-        updated_ms = state.get("updatedAt") or state.get("createdAt") or 0
-        try:
-            updated_ms = float(updated_ms)
-        except (TypeError, ValueError):
-            updated_ms = 0
-        records.append({
-            "tool": "kimi", "id": sid, "ts": (updated_ms / 1000.0) if updated_ms else 0,
-            "cwd": state.get("cwd"), "dir": sdir,
-        })
+        ts = parse_kimi_timestamp(state.get("updatedAt") or state.get("createdAt"))
+        # older sessions use "workDir" instead of "cwd" in state.json; the
+        # index itself also records workDir as a last-resort fallback.
+        cwd = state.get("cwd") or state.get("workDir") or entry.get("workDir")
+        records.append({"tool": "kimi", "id": sid, "ts": ts, "cwd": cwd, "dir": sdir})
     return records
 
 

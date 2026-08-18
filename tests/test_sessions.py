@@ -203,6 +203,56 @@ def test_kimi_light_records_skips_archived_unless_all(monkeypatch, tmp_path):
     assert len(sessions.kimi_light_records(show_all=True)) == 1
 
 
+# ---------- kimi: older state.json schema (ISO timestamps, workDir not cwd) ----------
+
+def test_parse_kimi_timestamp_handles_epoch_ms_and_iso_string():
+    assert sessions.parse_kimi_timestamp(1786944176340) == 1786944176340 / 1000.0
+    assert sessions.parse_kimi_timestamp("2026-07-20T01:49:19.177Z") == 1784512159
+    assert sessions.parse_kimi_timestamp(None) == 0
+    assert sessions.parse_kimi_timestamp("") == 0
+    assert sessions.parse_kimi_timestamp("not a date") == 0
+
+
+def test_kimi_light_records_handles_older_schema(monkeypatch, tmp_path):
+    """Regression test: older kimi-code sessions store updatedAt/createdAt
+    as ISO-8601 strings (not epoch ms) and have no "cwd" key at all -- only
+    "workDir". Both used to produce ts=0 / cwd=None ("?" in the listing)."""
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    sess_dir = tmp_path / "sessdir"
+    sess_dir.mkdir()
+    (sess_dir / "state.json").write_text(json.dumps({
+        "createdAt": "2026-07-19T01:14:01.737Z",
+        "updatedAt": "2026-07-20T01:49:19.177Z",
+        "title": "hi",
+        "workDir": "/data/ThunderBird",
+    }))
+    (kimi_home / "session_index.jsonl").write_text(json.dumps({
+        "sessionId": "session_old", "sessionDir": str(sess_dir), "workDir": "/data/ThunderBird",
+    }) + "\n")
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+
+    recs = sessions.kimi_light_records(show_all=False)
+    assert len(recs) == 1
+    assert recs[0]["ts"] > 0
+    assert recs[0]["cwd"] == "/data/ThunderBird"
+
+
+def test_kimi_light_records_falls_back_to_index_workdir_when_state_has_neither(monkeypatch, tmp_path):
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    sess_dir = tmp_path / "sessdir"
+    sess_dir.mkdir()
+    (sess_dir / "state.json").write_text(json.dumps({"updatedAt": 1700000000000}))
+    (kimi_home / "session_index.jsonl").write_text(json.dumps({
+        "sessionId": "session_x", "sessionDir": str(sess_dir), "workDir": "/from/index",
+    }) + "\n")
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+
+    recs = sessions.kimi_light_records(show_all=False)
+    assert recs[0]["cwd"] == "/from/index"
+
+
 def test_kimi_session_cwd_reads_workdir_from_index(monkeypatch, tmp_path):
     kimi_home = tmp_path / ".kimi-code"
     kimi_home.mkdir()
