@@ -248,6 +248,17 @@ def kimi_title(sdir):
     return "(no title)"
 
 
+def kimi_session_cwd(sid):
+    """kimi -S refuses to resume a session from a different cwd than the one
+    it was created in; session_index.jsonl already records that cwd as
+    workDir, so we can chdir there ourselves instead of making the user do
+    it by hand."""
+    for entry in kimi_index():
+        if entry.get("sessionId") == sid:
+            return entry.get("workDir")
+    return None
+
+
 def kimi_resolve(prefix):
     ids = [e.get("sessionId", "") for e in kimi_index()]
     matches = [i for i in ids if i.startswith(prefix)]
@@ -410,6 +421,10 @@ def cmd_resume(args):
     elif tool == "codex":
         exec_or_die(["codex", "resume", full_id, *extra])
     else:
+        target_cwd = kimi_session_cwd(full_id)
+        if target_cwd and os.path.isdir(target_cwd) and os.path.realpath(target_cwd) != os.path.realpath(os.getcwd()):
+            print(f"ai resume: this kimi session was created in {target_cwd}, switching there first", file=sys.stderr)
+            os.chdir(target_cwd)
         exec_or_die(["kimi", "-S", full_id, *extra])
 
 

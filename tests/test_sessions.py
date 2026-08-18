@@ -177,6 +177,65 @@ def test_kimi_light_records_skips_archived_unless_all(monkeypatch, tmp_path):
     assert len(sessions.kimi_light_records(show_all=True)) == 1
 
 
+def test_kimi_session_cwd_reads_workdir_from_index(monkeypatch, tmp_path):
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    (kimi_home / "session_index.jsonl").write_text(
+        json.dumps({"sessionId": "session_a", "sessionDir": "/x", "workDir": "/mnt/win/ThunderBird"}) + "\n"
+        + json.dumps({"sessionId": "session_b", "sessionDir": "/y", "workDir": "/home/hunt"}) + "\n"
+    )
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+
+    assert sessions.kimi_session_cwd("session_a") == "/mnt/win/ThunderBird"
+    assert sessions.kimi_session_cwd("session_b") == "/home/hunt"
+    assert sessions.kimi_session_cwd("session_unknown") is None
+
+
+def test_cmd_resume_kimi_chdirs_into_session_workdir_first(monkeypatch, tmp_path, capsys):
+    """Regression test: `kimi -S <id>` refuses to resume a session created
+    under a different cwd. Rather than surfacing that raw error, ai resume
+    should chdir into the session's own recorded workDir first."""
+    other_dir = tmp_path / "other-project"
+    other_dir.mkdir()
+
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    (kimi_home / "session_index.jsonl").write_text(
+        json.dumps({"sessionId": "session_abc", "sessionDir": "/x", "workDir": str(other_dir)}) + "\n"
+    )
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+
+    starting_dir = tmp_path
+    monkeypatch.chdir(starting_dir)
+
+    exec_calls = []
+    monkeypatch.setattr(sessions, "exec_or_die", lambda argv: exec_calls.append(argv))
+
+    sessions.cmd_resume(["kimi", "session_abc"])
+
+    assert os.path.realpath(os.getcwd()) == os.path.realpath(str(other_dir))
+    assert exec_calls == [["kimi", "-S", "session_abc"]]
+    assert "switching there first" in capsys.readouterr().err
+
+
+def test_cmd_resume_kimi_skips_chdir_when_already_in_workdir(monkeypatch, tmp_path, capsys):
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    (kimi_home / "session_index.jsonl").write_text(
+        json.dumps({"sessionId": "session_abc", "sessionDir": "/x", "workDir": str(tmp_path)}) + "\n"
+    )
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+    monkeypatch.chdir(tmp_path)
+
+    exec_calls = []
+    monkeypatch.setattr(sessions, "exec_or_die", lambda argv: exec_calls.append(argv))
+
+    sessions.cmd_resume(["kimi", "session_abc"])
+
+    assert exec_calls == [["kimi", "-S", "session_abc"]]
+    assert "switching there first" not in capsys.readouterr().err
+
+
 # ---------- list cache / resume by number ----------
 
 def test_cmd_list_writes_numbered_cache(monkeypatch, tmp_path, capsys):

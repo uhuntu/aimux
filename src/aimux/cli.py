@@ -157,6 +157,10 @@ def main():
     if tool == "resume":
         sessions.cmd_resume(rest)
         return
+    if tool.isdigit():
+        # `ai <N>` is shorthand for `ai resume <N>`.
+        sessions.cmd_resume(argv)
+        return
     if tool == "update":
         update.cmd_update(rest)
         return
