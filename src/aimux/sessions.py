@@ -17,6 +17,25 @@ UUID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{
 
 TOOLS = ("claude", "codex", "kimi")
 
+# Remembers the last `ai sessions` listing so `ai resume <N>` can refer to a
+# row by its printed number instead of needing the full/prefix session id.
+LIST_CACHE_FILE = os.path.join(HOME, ".cache", "aimux", "last_list.json")
+
+
+def write_list_cache(entries):
+    """entries: list of {"tool": ..., "id": ...} in printed order."""
+    try:
+        os.makedirs(os.path.dirname(LIST_CACHE_FILE), exist_ok=True)
+        with open(LIST_CACHE_FILE, "w") as fh:
+            json.dump(entries, fh)
+    except OSError:
+        pass  # best-effort -- resume-by-number just won't work this time
+
+
+def read_list_cache():
+    entries = read_json(LIST_CACHE_FILE)
+    return entries if isinstance(entries, list) else []
+
 
 def exec_or_die(argv):
     """os.execvp, but with a clean message instead of a traceback if the
@@ -319,27 +338,46 @@ def cmd_list(args):
         else:
             title = kimi_title(r["dir"])
             cwd_show = r.get("cwd") or "?"
-        rows.append((tool, relative_time(r["ts"]), r["id"][:12], cwd_show, title))
+        rows.append((tool, r["id"], relative_time(r["ts"]), r["id"][:12], cwd_show, title))
 
     if not rows:
         print("No sessions found.")
         return
 
-    w_tool = max(4, max(len(r[0]) for r in rows))
-    w_when = max(4, max(len(r[1]) for r in rows))
-    w_id = max(2, max(len(r[2]) for r in rows))
-    w_cwd = min(40, max(3, max(len(r[3]) for r in rows)))
+    write_list_cache([{"tool": tool, "id": full_id} for tool, full_id, *_ in rows])
 
-    header = f"{'TOOL':<{w_tool}}  {'WHEN':<{w_when}}  {'ID':<{w_id}}  {'CWD':<{w_cwd}}  TITLE"
+    w_num = len(str(len(rows)))
+    w_tool = max(4, max(len(r[0]) for r in rows))
+    w_when = max(4, max(len(r[2]) for r in rows))
+    w_id = max(2, max(len(r[3]) for r in rows))
+    w_cwd = min(40, max(3, max(len(r[4]) for r in rows)))
+
+    header = f"{'#':>{w_num}}  {'TOOL':<{w_tool}}  {'WHEN':<{w_when}}  {'ID':<{w_id}}  {'CWD':<{w_cwd}}  TITLE"
     print(header)
-    for tool, when, sid, cwd_show, title in rows:
+    for n, (tool, _full_id, when, sid, cwd_show, title) in enumerate(rows, start=1):
         cwd_disp = cwd_show if len(cwd_show) <= w_cwd else "…" + cwd_show[-(w_cwd - 1):]
-        print(f"{tool:<{w_tool}}  {when:<{w_when}}  {sid:<{w_id}}  {cwd_disp:<{w_cwd}}  {title}")
+        print(f"{n:>{w_num}}  {tool:<{w_tool}}  {when:<{w_when}}  {sid:<{w_id}}  {cwd_disp:<{w_cwd}}  {title}")
+
+
+def resume_by_number(n, extra):
+    cache = read_list_cache()
+    if not cache:
+        print("ai resume: no session list cached yet -- run `ai sessions` first", file=sys.stderr)
+        sys.exit(1)
+    if not (1 <= n <= len(cache)):
+        print(f"ai resume: {n} is out of range (last listing had {len(cache)} rows)", file=sys.stderr)
+        sys.exit(1)
+    entry = cache[n - 1]
+    cmd_resume([entry["tool"], entry["id"], *extra])
 
 
 def cmd_resume(args):
+    if args and args[0].isdigit():
+        resume_by_number(int(args[0]), args[1:])
+        return
+
     if not args or args[0] not in TOOLS:
-        print(f"Usage: ai resume <{'|'.join(TOOLS)}> [session-id-or-prefix]", file=sys.stderr)
+        print(f"Usage: ai resume <{'|'.join(TOOLS)}|N> [session-id-or-prefix]", file=sys.stderr)
         sys.exit(1)
     tool = args[0]
     rest = args[1:]

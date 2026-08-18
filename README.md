@@ -64,7 +64,10 @@ ai sessions --all           # include archived sessions
 
 ai resume kimi 97946bc7     # resume by short id / prefix (resolved against real session ids)
 ai resume claude            # no id -> tool's own interactive picker
+ai resume 3                 # resume row 3 from the last `ai`/`ai sessions` listing
 ```
+
+Every `ai`/`ai sessions` listing is numbered and cached, so `ai resume <N>` is usually the fastest way in: run `ai`, glance at the row you want, `ai resume 3`. The cache is just the last listing you saw — it's overwritten by the next `ai sessions` call and doesn't try to detect if the underlying sessions changed since.
 
 ### Normalized flags (`ai <tool> ...`)
 

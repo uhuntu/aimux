@@ -177,6 +177,76 @@ def test_kimi_light_records_skips_archived_unless_all(monkeypatch, tmp_path):
     assert len(sessions.kimi_light_records(show_all=True)) == 1
 
 
+# ---------- list cache / resume by number ----------
+
+def test_cmd_list_writes_numbered_cache(monkeypatch, tmp_path, capsys):
+    kimi_home = tmp_path / ".kimi-code"
+    kimi_home.mkdir()
+    sess_dir = tmp_path / "sessdir"
+    sess_dir.mkdir()
+    (sess_dir / "state.json").write_text(json.dumps({"cwd": "/home/hunt", "updatedAt": 1700000000000}))
+    (kimi_home / "session_index.jsonl").write_text(json.dumps({
+        "sessionId": "session_abc123", "sessionDir": str(sess_dir),
+    }) + "\n")
+    monkeypatch.setattr(sessions, "KIMI_HOME", str(kimi_home))
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(tmp_path / "no-codex"))
+    monkeypatch.setattr(sessions, "CLAUDE_PROJECTS", str(tmp_path / "no-claude"))
+    cache_file = tmp_path / "cache" / "last_list.json"
+    monkeypatch.setattr(sessions, "LIST_CACHE_FILE", str(cache_file))
+
+    sessions.cmd_list([])
+
+    out = capsys.readouterr().out
+    assert out.splitlines()[0].split()[0] == "#"
+    assert out.splitlines()[1].split()[0] == "1"
+
+    cached = json.loads(cache_file.read_text())
+    assert cached == [{"tool": "kimi", "id": "session_abc123"}]
+
+
+def test_resume_by_number_dispatches_correct_session(monkeypatch, tmp_path):
+    cache_file = tmp_path / "last_list.json"
+    cache_file.write_text(json.dumps([
+        {"tool": "claude", "id": "aaaa"},
+        {"tool": "kimi", "id": "session_bbbb"},
+    ]))
+    monkeypatch.setattr(sessions, "LIST_CACHE_FILE", str(cache_file))
+
+    calls = []
+    monkeypatch.setattr(sessions, "exec_or_die", lambda argv: calls.append(argv))
+
+    sessions.resume_by_number(2, ["-p", "hi"])
+
+    assert calls == [["kimi", "-S", "session_bbbb", "-p", "hi"]]
+
+
+def test_resume_by_number_out_of_range(tmp_path, monkeypatch, capsys):
+    cache_file = tmp_path / "last_list.json"
+    cache_file.write_text(json.dumps([{"tool": "claude", "id": "aaaa"}]))
+    monkeypatch.setattr(sessions, "LIST_CACHE_FILE", str(cache_file))
+
+    with pytest.raises(SystemExit):
+        sessions.resume_by_number(5, [])
+    assert "out of range" in capsys.readouterr().err
+
+
+def test_resume_by_number_no_cache(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sessions, "LIST_CACHE_FILE", str(tmp_path / "does-not-exist.json"))
+
+    with pytest.raises(SystemExit):
+        sessions.resume_by_number(1, [])
+    assert "no session list cached" in capsys.readouterr().err
+
+
+def test_cmd_resume_routes_numeric_arg_to_resume_by_number(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sessions, "resume_by_number", lambda n, extra: calls.append((n, extra)))
+
+    sessions.cmd_resume(["3", "-p", "hi"])
+
+    assert calls == [(3, ["-p", "hi"])]
+
+
 # ---------- cmd_list argument validation ----------
 
 def test_cmd_list_rejects_non_numeric_limit(capsys):
