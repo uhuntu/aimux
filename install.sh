@@ -37,10 +37,8 @@ for name in ai ai-sessions; do
 done
 
 for alias_name in aim aimux; do
-  if [[ ! -e "$BIN_DIR/$alias_name" ]]; then
-    ln -sf "$SCRIPT_DIR/bin/ai" "$BIN_DIR/$alias_name"
-    echo "linked $BIN_DIR/$alias_name -> $SCRIPT_DIR/bin/ai (alias)"
-  fi
+  ln -sf "$SCRIPT_DIR/bin/ai" "$BIN_DIR/$alias_name"
+  echo "linked $BIN_DIR/$alias_name -> $SCRIPT_DIR/bin/ai (alias)"
 done
 
 case ":$PATH:" in
