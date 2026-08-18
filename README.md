@@ -67,9 +67,19 @@ ai sessions --all           # include archived sessions
 ai resume kimi 97946bc7     # resume by short id / prefix (resolved against real session ids)
 ai resume claude            # no id -> tool's own interactive picker
 ai resume 3                 # resume row 3 from the last `ai`/`ai sessions` listing
+
+ai search "the nfc frequency lock issue"   # find sessions relevant to a topic
+ai search "katago" --tool claude           # restrict the candidates to one tool
+ai search "..." --judge kimi               # use a different model to judge relevance
 ```
 
 Every `ai`/`ai sessions` listing is numbered and cached, so `ai resume <N>` is usually the fastest way in: run `ai`, glance at the row you want, `ai resume 3`. The cache is just the last listing you saw — it's overwritten by the next `ai sessions` call and doesn't try to detect if the underlying sessions changed since.
+
+### How `ai search` works
+
+Titles alone miss a lot — plenty of sessions are titled "hi" or "(no title)". So `ai search` doesn't grep for your exact words; it builds one prompt listing every candidate session's tool, cwd, title, and a short content snippet, and asks an LLM (`claude -p` by default) to pick out which numbers are actually relevant to your topic. One batched call, not one call per session — with 100+ sessions, calling an LLM separately for each would be far too slow and far too expensive. That also means it costs one real LLM call (tokens, however your `claude`/`codex`/`kimi` account bills them) every time you run it.
+
+It reasons about more than just keyword overlap — e.g. searching "katago" correctly pulled in sessions with generic titles like "hi" or "(no title)" that were run inside the `katago` project directory, which plain text search would have missed entirely.
 
 ### Normalized flags (`ai <tool> ...`)
 

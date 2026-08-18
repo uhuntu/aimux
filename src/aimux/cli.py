@@ -4,11 +4,12 @@ everything else straight through.
 """
 import sys
 
-from . import __version__, sessions, update
+from . import __version__, search, sessions, update
 
 USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra native args]
        ai sessions [--tool T] [--limit N|all] [--cwd] [--all]
        ai full [--tool T] [--cwd] [--all]
+       ai search <topic> [--tool T] [--judge claude|codex|kimi]
        ai resume <claude|codex|kimi|N> [session-id-or-prefix]
        ai update [tools|all]
 
@@ -41,6 +42,7 @@ Examples:
   ai update           # update aimux itself
   ai update tools     # update claude, codex, and kimi (whichever are installed)
   ai update all       # both of the above
+  ai search "the nfc frequency lock issue"   # asks claude to find relevant sessions
 """
 
 TOOLS = ("claude", "codex", "kimi")
@@ -57,7 +59,7 @@ def build_command(tool, rest):
     command to run. Pure function, no I/O — raises UsageError on bad
     input instead of exiting, so it's easy to unit test."""
     if tool not in TOOLS:
-        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/full/resume/update)")
+        raise UsageError(f"unknown tool '{tool}' (expected claude, codex, or kimi, or sessions/full/search/resume/update)")
 
     print_ = False
     continue_session = False
@@ -170,6 +172,9 @@ def main():
         return
     if tool == "update":
         update.cmd_update(rest)
+        return
+    if tool == "search":
+        search.cmd_search(rest)
         return
 
     try:

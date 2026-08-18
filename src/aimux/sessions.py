@@ -97,6 +97,43 @@ def claude_light_records():
     return list(by_id.values())
 
 
+def extract_text_from_content(content):
+    """A claude/kimi message's content is either a plain string or a list
+    of typed blocks (text, image, ...); pull the first text block either
+    way, or None."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "text":
+                return block.get("text")
+    return None
+
+
+def claude_snippet(path, max_messages=3, max_chars=200):
+    """A longer excerpt than claude_title_and_cwd's single-message title,
+    for `ai search`: concatenates up to max_messages user message texts so
+    a topic that only shows up a couple of messages in can still match."""
+    texts = []
+    try:
+        with open(path) as fh:
+            for i, line in enumerate(fh):
+                if i > 80 or len(texts) >= max_messages:
+                    break
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") != "user":
+                    continue
+                text = extract_text_from_content(d.get("message", {}).get("content"))
+                if text:
+                    texts.append(text.strip().replace("\n", " "))
+    except FileNotFoundError:
+        pass
+    return " | ".join(texts)[:max_chars]
+
+
 def claude_title_and_cwd(path, cwd_fallback):
     """Scan a session's jsonl once for both a title (first user message)
     and the real cwd (more reliable than guessing from the project
@@ -117,16 +154,7 @@ def claude_title_and_cwd(path, cwd_fallback):
                     cwd = d["cwd"]
                 if title != "(no title)" or d.get("type") != "user":
                     continue
-                msg = d.get("message", {})
-                content = msg.get("content")
-                text = None
-                if isinstance(content, str):
-                    text = content
-                elif isinstance(content, list):
-                    for block in content:
-                        if isinstance(block, dict) and block.get("type") == "text":
-                            text = block.get("text")
-                            break
+                text = extract_text_from_content(d.get("message", {}).get("content"))
                 if text:
                     title = text.strip().replace("\n", " ")[:70]
     except FileNotFoundError:
@@ -267,6 +295,32 @@ def kimi_title(sdir):
     return "(no title)"
 
 
+def kimi_snippet(sdir, max_messages=3, max_chars=200):
+    """Longer excerpt than kimi_title's single-prompt title, for `ai search`."""
+    wire = os.path.join(sdir, "agents", "main", "wire.jsonl")
+    texts = []
+    try:
+        with open(wire) as fh:
+            for i, line in enumerate(fh):
+                if i > 120 or len(texts) >= max_messages:
+                    break
+                try:
+                    d = json.loads(line)
+                except Exception:
+                    continue
+                if d.get("type") != "turn.prompt":
+                    continue
+                for block in d.get("input", []):
+                    if isinstance(block, dict) and block.get("type") == "text":
+                        t = block.get("text", "").strip().replace("\n", " ")
+                        if t:
+                            texts.append(t)
+                        break
+    except FileNotFoundError:
+        pass
+    return " | ".join(texts)[:max_chars]
+
+
 def kimi_session_cwd(sid):
     """kimi -S refuses to resume a session from a different cwd than the one
     it was created in; session_index.jsonl already records that cwd as
@@ -358,21 +412,30 @@ def cmd_list(args):
         light = [r for r in light if r.get("cwd") == cwd]
 
     top = light[:limit]
+    rows = [resolve_row(r) for r in top]
+    render_rows(rows)
 
-    rows = []
-    for r in top:
-        tool = r["tool"]
-        if tool == "claude":
-            title, cwd_resolved = claude_title_and_cwd(r["path"], r.get("cwd"))
-            cwd_show = cwd_resolved or "?"
-        elif tool == "codex":
-            title = r.get("title", "(no title)")
-            cwd_show = codex_cwd(r["id"]) or "?"
-        else:
-            title = kimi_title(r["dir"])
-            cwd_show = r.get("cwd") or "?"
-        rows.append((tool, r["id"], relative_time(r["ts"]), r["id"][:12], cwd_show, title))
 
+def resolve_row(r):
+    """Turn a light record into the tuple used for both display and the
+    resume cache: (tool, full_id, when, short_id, cwd, title). Shared by
+    cmd_list and `ai search`."""
+    tool = r["tool"]
+    if tool == "claude":
+        title, cwd_resolved = claude_title_and_cwd(r["path"], r.get("cwd"))
+        cwd_show = cwd_resolved or "?"
+    elif tool == "codex":
+        title = r.get("title", "(no title)")
+        cwd_show = codex_cwd(r["id"]) or "?"
+    else:
+        title = kimi_title(r["dir"])
+        cwd_show = r.get("cwd") or "?"
+    return (tool, r["id"], relative_time(r["ts"]), r["id"][:12], cwd_show, title)
+
+
+def render_rows(rows):
+    """rows: list of resolve_row()-shaped tuples, already in display order.
+    Prints the numbered table and writes the resume cache."""
     if not rows:
         print("No sessions found.")
         return
