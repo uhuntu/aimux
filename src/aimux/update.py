@@ -11,6 +11,22 @@ TOOL_UPDATE_CMD = {
     "kimi": ["kimi", "update"],
 }
 
+# claude's updater fetches from a single Google-Cloud-fronted host with no
+# fallback mirror (unlike codex, which falls back to GitHub Releases when
+# its primary source stalls), so it fails more often -- especially on
+# networks that block/throttle Google Cloud IPs. Worth a pointed hint
+# rather than just the raw error.
+TOOL_UPDATE_HINTS = {
+    "claude": (
+        "claude's updater has no fallback mirror and can fail on networks that "
+        "block/throttle Google Cloud IPs (downloads.claude.ai). If this keeps "
+        "happening, try routing the update through a proxy, or download the "
+        "release binary directly from "
+        "https://downloads.claude.ai/claude-code-releases/<version>/linux-x64/claude "
+        "via a proxy and install it manually."
+    ),
+}
+
 
 def detect_repo_dir(package_dir):
     """If aimux was installed by symlinking into a git clone (the curl or
@@ -50,6 +66,9 @@ def update_tools():
         result = subprocess.run(argv)
         if result.returncode != 0:
             worst = result.returncode
+            hint = TOOL_UPDATE_HINTS.get(tool)
+            if hint:
+                print(f"  hint: {hint}", file=sys.stderr)
     return worst
 
 

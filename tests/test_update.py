@@ -117,6 +117,38 @@ def test_update_tools_runs_each_installed_tools_update_command(monkeypatch):
     assert calls == [["claude", "update"], ["codex", "update"], ["kimi", "update"]]
 
 
+def test_update_tools_prints_hint_when_claude_fails(monkeypatch, capsys):
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class FakeResult:
+        def __init__(self, code):
+            self.returncode = code
+
+    codes = {"claude": 1, "codex": 0, "kimi": 0}
+    monkeypatch.setattr(update.subprocess, "run", lambda argv, **kw: FakeResult(codes[argv[0]]))
+
+    update.update_tools()
+
+    err = capsys.readouterr().err
+    assert "hint:" in err
+    assert "downloads.claude.ai" in err
+
+
+def test_update_tools_no_hint_when_codex_or_kimi_fail(monkeypatch, capsys):
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class FakeResult:
+        def __init__(self, code):
+            self.returncode = code
+
+    codes = {"claude": 0, "codex": 1, "kimi": 1}
+    monkeypatch.setattr(update.subprocess, "run", lambda argv, **kw: FakeResult(codes[argv[0]]))
+
+    update.update_tools()
+
+    assert "hint:" not in capsys.readouterr().err
+
+
 def test_update_tools_reports_worst_exit_code_but_keeps_going(monkeypatch):
     monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
 
