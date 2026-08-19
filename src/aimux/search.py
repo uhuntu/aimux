@@ -13,8 +13,13 @@ import sys
 from . import sessions
 
 JUDGE_CMD = {
-    "claude": ["claude", "-p"],
-    "codex": ["codex", "exec"],
+    # --no-session-persistence / --ephemeral: the judge call's own prompt
+    # (the whole candidate list) would otherwise get saved as a real,
+    # visible session -- showing up in `ai`/`ai full` with the raw prompt
+    # text as its title, polluting the very listing this command reads.
+    # kimi has no equivalent flag, so `--judge kimi` will still leak one.
+    "claude": ["claude", "-p", "--no-session-persistence"],
+    "codex": ["codex", "exec", "--ephemeral"],
     "kimi": ["kimi", "-p"],
 }
 DEFAULT_JUDGE = "claude"

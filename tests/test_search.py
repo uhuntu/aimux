@@ -5,6 +5,15 @@ import pytest
 from aimux import search, sessions
 
 
+def test_judge_calls_dont_persist_a_visible_session():
+    """Regression test: without an ephemeral/no-persist flag, the judge
+    call's own prompt (the whole candidate list) gets saved as a real
+    session and shows up in `ai`/`ai full` with the raw prompt as its
+    title -- the tool polluting the listing it reads from."""
+    assert "--no-session-persistence" in search.JUDGE_CMD["claude"]
+    assert "--ephemeral" in search.JUDGE_CMD["codex"]
+
+
 def test_build_prompt_numbers_entries_in_order():
     prompt = search.build_prompt("nfc issue", [
         ("codex", "/a", "Find isnfcon", "Find isnfcon"),
@@ -94,7 +103,7 @@ def test_cmd_search_filters_to_llm_picked_rows(monkeypatch, capsys):
     search.cmd_search(["nfc", "frequency", "lock"])
 
     assert calls[0][:2] == ["claude", "-p"]
-    assert "nfc frequency lock" in calls[0][2]
+    assert "nfc frequency lock" in calls[0][-1]  # prompt is always the last arg
     assert len(rendered) == 1
     assert [row[1] for row in rendered[0]] == ["id-1"]
 
