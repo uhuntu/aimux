@@ -110,7 +110,7 @@ def extract_text_from_content(content, text_types=("text",)):
     return None
 
 
-def claude_snippet(path, max_messages=12, max_chars=200):
+def claude_snippet(path, max_messages=12, max_chars=800):
     """A longer excerpt than claude_title_and_cwd's single-message title,
     for `ai search`: concatenates up to max_messages user message texts so
     a topic that only shows up partway into the conversation can still
@@ -298,7 +298,7 @@ def codex_rollout_title(sid):
     return texts[0][:70] if texts else "(no title)"
 
 
-def codex_rollout_snippet(sid, max_messages=12, max_chars=200):
+def codex_rollout_snippet(sid, max_messages=12, max_chars=800):
     """Longer excerpt than codex_rollout_title's single-message title, for
     `ai search`. Mirrors claude_snippet/kimi_snippet."""
     path = codex_rollout_path(sid)
@@ -387,7 +387,7 @@ def kimi_title(sdir):
     return "(no title)"
 
 
-def kimi_snippet(sdir, max_messages=12, max_chars=200):
+def kimi_snippet(sdir, max_messages=12, max_chars=800):
     """Longer excerpt than kimi_title's single-prompt title, for `ai search`.
     Same wider window as claude_snippet -- a topic that only shows up
     partway into the conversation should still be visible to the judge."""
