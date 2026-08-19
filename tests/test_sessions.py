@@ -286,6 +286,22 @@ def test_claude_content_list_with_text_block(tmp_path):
     assert title == "the real prompt"
 
 
+def test_claude_snippet_finds_topic_past_old_80_line_cutoff(tmp_path):
+    """Regression test: a real session had its relevant message at line 92
+    of 191, past the old 80-line/3-message scan window, so `ai search`
+    never saw it and wrongly reported no relevant sessions."""
+    session_file = tmp_path / "s.jsonl"
+    lines = [json.dumps({"type": "assistant", "message": {"content": "padding"}}) for _ in range(90)]
+    lines.append(json.dumps({
+        "type": "user",
+        "message": {"content": "please change the default navigation bar mode from taskbar back"},
+    }))
+    session_file.write_text("\n".join(lines) + "\n")
+
+    snippet = sessions.claude_snippet(str(session_file))
+    assert "navigation bar mode" in snippet
+
+
 # ---------- kimi ----------
 
 def test_kimi_resolve_tries_session_prefix_fallback(monkeypatch, tmp_path):
@@ -302,6 +318,21 @@ def test_kimi_resolve_tries_session_prefix_fallback(monkeypatch, tmp_path):
     assert sessions.kimi_resolve("97946bc7") == ["session_97946bc7-c5d4-4419-85d1-1316cb7f4295"]
     # already-prefixed also works
     assert sessions.kimi_resolve("session_97946bc7") == ["session_97946bc7-c5d4-4419-85d1-1316cb7f4295"]
+
+
+def test_kimi_snippet_finds_topic_past_old_120_line_cutoff(tmp_path):
+    sess_dir = tmp_path / "sessdir"
+    (sess_dir / "agents" / "main").mkdir(parents=True)
+    wire = sess_dir / "agents" / "main" / "wire.jsonl"
+    lines = [json.dumps({"type": "llm.request"}) for _ in range(130)]
+    lines.append(json.dumps({
+        "type": "turn.prompt",
+        "input": [{"type": "text", "text": "please change the default navigation bar mode"}],
+    }))
+    wire.write_text("\n".join(lines) + "\n")
+
+    snippet = sessions.kimi_snippet(str(sess_dir))
+    assert "navigation bar mode" in snippet
 
 
 def test_kimi_light_records_skips_archived_unless_all(monkeypatch, tmp_path):

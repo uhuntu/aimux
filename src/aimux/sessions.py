@@ -110,15 +110,18 @@ def extract_text_from_content(content, text_types=("text",)):
     return None
 
 
-def claude_snippet(path, max_messages=3, max_chars=200):
+def claude_snippet(path, max_messages=12, max_chars=200):
     """A longer excerpt than claude_title_and_cwd's single-message title,
     for `ai search`: concatenates up to max_messages user message texts so
-    a topic that only shows up a couple of messages in can still match."""
+    a topic that only shows up partway into the conversation can still
+    match. (Previously capped at the first 80 lines / 3 messages, which
+    missed real topics that first appeared later -- e.g. a 191-line session
+    where the relevant message was at line 92.)"""
     texts = []
     try:
         with open(path) as fh:
             for i, line in enumerate(fh):
-                if i > 80 or len(texts) >= max_messages:
+                if i > 2000 or len(texts) >= max_messages:
                     break
                 try:
                     d = json.loads(line)
@@ -359,14 +362,16 @@ def kimi_title(sdir):
     return "(no title)"
 
 
-def kimi_snippet(sdir, max_messages=3, max_chars=200):
-    """Longer excerpt than kimi_title's single-prompt title, for `ai search`."""
+def kimi_snippet(sdir, max_messages=12, max_chars=200):
+    """Longer excerpt than kimi_title's single-prompt title, for `ai search`.
+    Same wider window as claude_snippet -- a topic that only shows up
+    partway into the conversation should still be visible to the judge."""
     wire = os.path.join(sdir, "agents", "main", "wire.jsonl")
     texts = []
     try:
         with open(wire) as fh:
             for i, line in enumerate(fh):
-                if i > 120 or len(texts) >= max_messages:
+                if i > 2000 or len(texts) >= max_messages:
                     break
                 try:
                     d = json.loads(line)
