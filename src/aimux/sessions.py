@@ -247,18 +247,25 @@ def codex_light_records():
     return list(by_id.values())
 
 
-def codex_rollout_title(sid):
-    """Fallback title for sessions with no session_index.jsonl entry:
-    scan the rollout file itself for the first genuine user message,
-    skipping injected boilerplate (AGENTS.md instructions, permission
-    setup, skill lists) rather than surfacing that as the "title"."""
-    path = codex_rollout_path(sid)
-    if not path:
-        return "(no title)"
+CODEX_BOILERPLATE_PREFIXES = (
+    "# AGENTS.md", "<permissions", "<INSTRUCTIONS>", "<user_instructions>", "<environment_context>",
+)
+
+
+def _codex_genuine_user_messages(path, max_messages, scan_limit=2000):
+    """Shared scan for codex_rollout_title/codex_rollout_snippet: yields
+    genuine user message texts from a rollout file, skipping injected
+    boilerplate (AGENTS.md instructions, permission setup, environment
+    context) by its distinctive prefix rather than by length -- a length
+    cutoff also filters out legitimate long, detailed task requests (a real
+    session had a 1304-char genuine message wrongly treated as boilerplate
+    and skipped entirely, leaving both `ai search` and the plain listing
+    with no way to find or label that session)."""
+    texts = []
     try:
         with open(path) as fh:
             for i, line in enumerate(fh):
-                if i > 30:
+                if i > scan_limit or len(texts) >= max_messages:
                     break
                 try:
                     d = json.loads(line)
@@ -273,14 +280,32 @@ def codex_rollout_title(sid):
                 if not text:
                     continue
                 stripped = text.strip()
-                if len(stripped) > 1000 or stripped.startswith((
-                    "# AGENTS.md", "<permissions", "<INSTRUCTIONS>", "<user_instructions>", "<environment_context>",
-                )):
+                if stripped.startswith(CODEX_BOILERPLATE_PREFIXES):
                     continue
-                return stripped.replace("\n", " ")[:70]
+                texts.append(stripped.replace("\n", " "))
     except FileNotFoundError:
         pass
-    return "(no title)"
+    return texts
+
+
+def codex_rollout_title(sid):
+    """Fallback title for sessions with no session_index.jsonl entry: the
+    first genuine user message in the rollout file, truncated for display."""
+    path = codex_rollout_path(sid)
+    if not path:
+        return "(no title)"
+    texts = _codex_genuine_user_messages(path, max_messages=1)
+    return texts[0][:70] if texts else "(no title)"
+
+
+def codex_rollout_snippet(sid, max_messages=12, max_chars=200):
+    """Longer excerpt than codex_rollout_title's single-message title, for
+    `ai search`. Mirrors claude_snippet/kimi_snippet."""
+    path = codex_rollout_path(sid)
+    if not path:
+        return ""
+    texts = _codex_genuine_user_messages(path, max_messages=max_messages)
+    return " | ".join(texts)[:max_chars]
 
 
 def codex_cwd(sid):

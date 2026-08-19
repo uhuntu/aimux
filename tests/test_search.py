@@ -51,10 +51,11 @@ def test_gather_candidates_respects_tool_filter(monkeypatch):
 
 def test_snippet_for_dispatches_per_tool(monkeypatch):
     monkeypatch.setattr(sessions, "claude_snippet", lambda path: f"claude:{path}")
+    monkeypatch.setattr(sessions, "codex_rollout_snippet", lambda sid: f"codex:{sid}")
     monkeypatch.setattr(sessions, "kimi_snippet", lambda d: f"kimi:{d}")
 
     assert search.snippet_for({"tool": "claude", "path": "/x.jsonl"}) == "claude:/x.jsonl"
-    assert search.snippet_for({"tool": "codex", "title": "Find isnfcon"}) == "Find isnfcon"
+    assert search.snippet_for({"tool": "codex", "id": "abc123", "title": "Find isnfcon"}) == "codex:abc123"
     assert search.snippet_for({"tool": "kimi", "dir": "/y"}) == "kimi:/y"
 
 

@@ -170,6 +170,56 @@ def test_codex_rollout_title_missing_session_returns_placeholder(monkeypatch, tm
     assert sessions.codex_rollout_title("no-such-id") == "(no title)"
 
 
+def test_codex_rollout_title_does_not_treat_long_real_messages_as_boilerplate(monkeypatch, tmp_path):
+    """Regression test: a real session had a genuine 1304-char task request
+    (multiple bullet-pointed change requests) wrongly filtered out by a
+    "skip if over 1000 chars" heuristic meant to catch AGENTS.md dumps,
+    leaving the session with no title in either `ai search` or the plain
+    listing even though it was a real, important conversation."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "01a018ff-5a11-7b2c-9d30-4f67e8a90123"
+    long_message = "Hunt,\n\nThank you for the update. " + ("Please also fix this other thing. " * 30)
+    assert len(long_message) > 1000
+    write_codex_rollout(codex_home, sid, cwd="/data/hunt/work", user_text=long_message)
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    title = sessions.codex_rollout_title(sid)
+    assert title != "(no title)"
+    assert title.startswith("Hunt,")
+
+
+def test_codex_rollout_snippet_collects_multiple_messages(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "019ffdbe-12ce-7e22-9a7f-30237f491124"
+    day_dir = codex_home / "sessions" / "2026" / "08" / "14"
+    day_dir.mkdir(parents=True)
+    path = day_dir / f"rollout-2026-08-14T00-00-00-{sid}.jsonl"
+
+    def user_line(text):
+        return json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]},
+        })
+
+    path.write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": sid, "cwd": "/x"}}) + "\n"
+        + user_line("change the default navigation bar mode") + "\n"
+        + user_line("also update the webview") + "\n"
+    )
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    snippet = sessions.codex_rollout_snippet(sid)
+    assert "navigation bar mode" in snippet
+    assert "update the webview" in snippet
+
+
+def test_codex_rollout_snippet_missing_session_returns_empty(monkeypatch, tmp_path):
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(tmp_path / ".codex"))
+    assert sessions.codex_rollout_snippet("no-such-id") == ""
+
+
 def test_codex_resolve_finds_rollout_only_sessions(monkeypatch, tmp_path):
     """codex_resolve must find sessions that only exist as rollout files,
     not just ones present in session_index.jsonl (which may not exist)."""
