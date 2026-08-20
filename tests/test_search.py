@@ -96,17 +96,46 @@ def test_cmd_search_filters_to_llm_picked_rows(monkeypatch, capsys):
     calls = []
 
     def fake_run(argv, **kwargs):
-        calls.append(argv)
+        calls.append((argv, kwargs))
         return FakeResult()
 
     monkeypatch.setattr(search.subprocess, "run", fake_run)
 
     search.cmd_search(["nfc", "frequency", "lock"])
 
-    assert calls[0][:2] == ["claude", "-p"]
-    assert "nfc frequency lock" in calls[0][-1]  # prompt is always the last arg
+    argv, kwargs = calls[0]
+    assert argv[:2] == ["claude", "-p"]
+    assert "nfc frequency lock" in kwargs["input"]  # long prompt passed via stdin
     assert len(rendered) == 1
     assert [row[1] for row in rendered[0]] == ["id-1"]
+
+
+def test_cmd_search_kimi_still_uses_argv(monkeypatch):
+    """kimi -p requires an argument and does not read stdin, so it must keep
+    receiving the prompt as the last argv element."""
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: [
+        {"tool": "codex", "id": "id-1", "ts": 1, "title": "x"},
+    ])
+    monkeypatch.setattr(sessions, "resolve_row", lambda r: (
+        r["tool"], r["id"], "1h ago", r["id"][:6], "?", r.get("title", "(no title)"),
+    ))
+    monkeypatch.setattr(sessions, "render_rows", lambda rows: None)
+
+    calls = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = "none"
+        stderr = ""
+
+    monkeypatch.setattr(search.subprocess, "run", lambda argv, **kw: calls.append((argv, kw)) or FakeResult())
+
+    search.cmd_search(["--judge", "kimi", "topic"])
+
+    argv, kwargs = calls[0]
+    assert argv[:2] == ["kimi", "-p"]
+    assert "topic" in argv[-1]
+    assert "input" not in kwargs
 
 
 def test_cmd_search_uses_requested_judge_tool(monkeypatch):

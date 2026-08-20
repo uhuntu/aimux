@@ -24,6 +24,11 @@ JUDGE_CMD = {
 }
 DEFAULT_JUDGE = "claude"
 
+# Judges that accept the prompt on stdin instead of argv. Passing a long
+# prompt as a command-line argument hits OS limits (ARG_MAX) once the
+# candidate list grows into the hundreds; stdin avoids that entirely.
+JUDGE_USES_STDIN = {"claude", "codex"}
+
 
 def gather_candidates(tool_filter):
     light = []
@@ -118,7 +123,10 @@ def cmd_search(argv):
     judge_cmd = JUDGE_CMD[judge]
     print(f"Asking {judge} to judge {len(rows)} sessions against: {topic!r} ...", file=sys.stderr, flush=True)
     try:
-        result = subprocess.run([*judge_cmd, prompt], capture_output=True, text=True)
+        if judge in JUDGE_USES_STDIN:
+            result = subprocess.run(judge_cmd, input=prompt, capture_output=True, text=True)
+        else:
+            result = subprocess.run([*judge_cmd, prompt], capture_output=True, text=True)
     except FileNotFoundError:
         print(f"ai search: '{judge_cmd[0]}' not found on PATH", file=sys.stderr)
         sys.exit(127)

@@ -510,6 +510,66 @@ def cmd_list(args):
     render_rows(rows)
 
 
+def cmd_stats(args):
+    """Print aggregate statistics about stored sessions."""
+    tool_filter = None
+    def next_value(flag, i):
+        if i + 1 >= len(args):
+            print(f"ai stats: {flag} requires a value", file=sys.stderr)
+            sys.exit(1)
+        return args[i + 1]
+
+    i = 0
+    while i < len(args):
+        a = args[i]
+        if a == "--tool":
+            tool_filter = next_value(a, i)
+            if tool_filter not in TOOLS:
+                print(f"ai stats: --tool must be one of {', '.join(TOOLS)}", file=sys.stderr)
+                sys.exit(1)
+            i += 2
+        else:
+            print(f"ai stats: unknown option '{a}'", file=sys.stderr)
+            sys.exit(1)
+
+    light = []
+    if tool_filter in (None, "claude"):
+        light += claude_light_records()
+    if tool_filter in (None, "codex"):
+        light += codex_light_records()
+    if tool_filter in (None, "kimi"):
+        light += kimi_light_records(True)
+
+    total = len(light)
+    if total == 0:
+        print("No sessions found.")
+        return
+
+    by_tool = {}
+    by_cwd = {}
+    oldest_ts = newest_ts = None
+    for r in light:
+        by_tool[r["tool"]] = by_tool.get(r["tool"], 0) + 1
+        cwd = r.get("cwd") or "?"
+        by_cwd[cwd] = by_cwd.get(cwd, 0) + 1
+        ts = r["ts"]
+        if oldest_ts is None or ts < oldest_ts:
+            oldest_ts = ts
+        if newest_ts is None or ts > newest_ts:
+            newest_ts = ts
+
+    print(f"Total sessions: {total}")
+    print("By tool:")
+    for tool in TOOLS:
+        if tool in by_tool:
+            print(f"  {tool:<7} {by_tool[tool]}")
+    print(f"Oldest:  {relative_time(oldest_ts)}")
+    print(f"Newest:  {relative_time(newest_ts)}")
+    print("Top directories:")
+    for cwd, n in sorted(by_cwd.items(), key=lambda kv: (-kv[1], kv[0]))[:5]:
+        print(f"  ({n}) {cwd}")
+
+
 def resolve_row(r):
     """Turn a light record into the tuple used for both display and the
     resume cache: (tool, full_id, when, short_id, cwd, title). Shared by
@@ -617,6 +677,8 @@ def main():
         cmd_list(rest)
     elif sub == "resume":
         cmd_resume(rest)
+    elif sub == "stats":
+        cmd_stats(rest)
     else:
         print(f"ai-sessions: unknown subcommand '{sub}'", file=sys.stderr)
         sys.exit(1)

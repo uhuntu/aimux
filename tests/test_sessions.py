@@ -617,6 +617,67 @@ def test_cmd_list_limit_all_shows_everything(monkeypatch, tmp_path, capsys):
     assert len(capsys.readouterr().out.splitlines()) == 31
 
 
+# ---------- cmd_stats ----------
+
+def test_cmd_stats_shows_counts_and_directories(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sessions.time, "time", lambda: 1_800_000_000)
+    monkeypatch.setattr(sessions, "claude_light_records", lambda: [
+        {"tool": "claude", "id": "c1", "ts": 1_799_900_000, "cwd": "/home/hunt/work/aimux"},
+        {"tool": "claude", "id": "c2", "ts": 1_799_950_000, "cwd": "/home/hunt"},
+    ])
+    monkeypatch.setattr(sessions, "codex_light_records", lambda: [
+        {"tool": "codex", "id": "x1", "ts": 1_799_990_000, "cwd": "/home/hunt/work/aimux"},
+    ])
+    monkeypatch.setattr(sessions, "kimi_light_records", lambda _all: [])
+
+    sessions.cmd_stats([])
+    out = capsys.readouterr().out
+    assert "Total sessions: 3" in out
+    assert "claude  2" in out
+    assert "codex   1" in out
+    assert "Oldest:  1d ago" in out
+    assert "Newest:  2h ago" in out
+    assert "(2) /home/hunt/work/aimux" in out
+    assert "(1) /home/hunt" in out
+
+
+def test_cmd_stats_tool_filter(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sessions.time, "time", lambda: 1_800_000_000)
+    monkeypatch.setattr(sessions, "claude_light_records", lambda: [
+        {"tool": "claude", "id": "c1", "ts": 1_799_900_000, "cwd": "/home/hunt/work/aimux"},
+    ])
+    monkeypatch.setattr(sessions, "codex_light_records", lambda: [
+        {"tool": "codex", "id": "x1", "ts": 1_799_990_000, "cwd": "/home/hunt/work/aimux"},
+    ])
+    monkeypatch.setattr(sessions, "kimi_light_records", lambda _all: [])
+
+    sessions.cmd_stats(["--tool", "codex"])
+    out = capsys.readouterr().out
+    assert "Total sessions: 1" in out
+    assert "codex   1" in out
+    assert "claude" not in out.split("By tool:")[-1]
+
+
+def test_cmd_stats_no_sessions(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sessions, "claude_light_records", lambda: [])
+    monkeypatch.setattr(sessions, "codex_light_records", lambda: [])
+    monkeypatch.setattr(sessions, "kimi_light_records", lambda _all: [])
+
+    sessions.cmd_stats([])
+    assert capsys.readouterr().out == "No sessions found.\n"
+
+
+def test_cmd_stats_unknown_option_exits(monkeypatch, tmp_path, capsys):
+    monkeypatch.setattr(sessions, "claude_light_records", lambda: [])
+    monkeypatch.setattr(sessions, "codex_light_records", lambda: [])
+    monkeypatch.setattr(sessions, "kimi_light_records", lambda _all: [])
+
+    with pytest.raises(SystemExit) as exc_info:
+        sessions.cmd_stats(["--nope"])
+    assert exc_info.value.code == 1
+    assert "unknown option" in capsys.readouterr().err
+
+
 # ---------- exec_or_die ----------
 
 def test_exec_or_die_missing_binary_reports_cleanly(monkeypatch, capsys):

@@ -12,6 +12,7 @@ USAGE = """Usage: ai <claude|codex|kimi> [common-options] [prompt] [-- extra nat
        ai search <topic> [--tool T] [--judge claude|codex|kimi]
        ai resume <claude|codex|kimi|N> [session-id-or-prefix]
        ai update [tools|all]
+       ai stats [--tool T]
 
 Common options (translated per-tool, all optional):
   -p, --print              Non-interactive: print response and exit
@@ -43,6 +44,7 @@ Examples:
   ai update tools     # update claude, codex, and kimi (whichever are installed)
   ai update all       # both of the above
   ai search "the nfc frequency lock issue"   # asks claude to find relevant sessions
+  ai stats            # session counts per tool, oldest/newest, top directories
 """
 
 TOOLS = ("claude", "codex", "kimi")
@@ -175,6 +177,9 @@ def main():
         return
     if tool == "search":
         search.cmd_search(rest)
+        return
+    if tool == "stats":
+        sessions.cmd_stats(rest)
         return
 
     try:

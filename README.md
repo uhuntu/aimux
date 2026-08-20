@@ -73,6 +73,9 @@ ai resume 3                 # resume row 3 from the last `ai`/`ai sessions` list
 ai search "the nfc frequency lock issue"   # find sessions relevant to a topic
 ai search "katago" --tool claude           # restrict the candidates to one tool
 ai search "..." --judge kimi               # use a different model to judge relevance
+
+ai stats                    # session counts per tool, oldest/newest, top directories
+ai stats --tool claude      # stats for one tool only
 ```
 
 Every `ai`/`ai sessions` listing is numbered and cached, so `ai resume <N>` is usually the fastest way in: run `ai`, glance at the row you want, `ai resume 3`. The cache is just the last listing you saw — it's overwritten by the next `ai sessions` call and doesn't try to detect if the underlying sessions changed since.
