@@ -74,9 +74,27 @@ def parse_numbers(text, max_n):
     return {n for n in nums if 1 <= n <= max_n}
 
 
+def _call_judge(judge, prompt):
+    """Run a single judge and return its subprocess.CompletedProcess."""
+    judge_cmd = JUDGE_CMD[judge]
+    try:
+        if judge in JUDGE_USES_STDIN:
+            return subprocess.run(judge_cmd, input=prompt, capture_output=True, text=True)
+        return subprocess.run([*judge_cmd, prompt], capture_output=True, text=True)
+    except FileNotFoundError:
+        print(f"ai search: '{judge_cmd[0]}' not found on PATH", file=sys.stderr)
+        sys.exit(127)
+
+
+def _is_session_limit(result):
+    output = (result.stdout or "") + (result.stderr or "")
+    return "session limit" in output.lower()
+
+
 def cmd_search(argv):
     tool_filter = None
     judge = DEFAULT_JUDGE
+    judge_explicit = False
     topic_parts = []
 
     i = 0
@@ -99,6 +117,7 @@ def cmd_search(argv):
             if judge not in JUDGE_CMD:
                 print(f"ai search: --judge must be one of {', '.join(JUDGE_CMD)}", file=sys.stderr)
                 sys.exit(1)
+            judge_explicit = True
             i += 2
         else:
             topic_parts.append(a)
@@ -120,27 +139,32 @@ def cmd_search(argv):
     entries = [(row[0], row[4], row[5], snippet) for row, snippet in zip(rows, snippets)]
     prompt = build_prompt(topic, entries)
 
-    judge_cmd = JUDGE_CMD[judge]
-    print(f"Asking {judge} to judge {len(rows)} sessions against: {topic!r} ...", file=sys.stderr, flush=True)
-    try:
-        if judge in JUDGE_USES_STDIN:
-            result = subprocess.run(judge_cmd, input=prompt, capture_output=True, text=True)
-        else:
-            result = subprocess.run([*judge_cmd, prompt], capture_output=True, text=True)
-    except FileNotFoundError:
-        print(f"ai search: '{judge_cmd[0]}' not found on PATH", file=sys.stderr)
-        sys.exit(127)
+    # Judges to try. If the user explicitly picked one, stick with it.
+    # Otherwise start with the default and fall back on transient failures
+    # like Claude's session limit.
+    judges = [judge] if judge_explicit else [DEFAULT_JUDGE, "codex", "kimi"]
 
-    if result.returncode != 0:
-        print(f"ai search: {judge} exited with an error", file=sys.stderr)
-        output = (result.stdout or "") + (result.stderr or "")
+    result = None
+    for j in judges:
+        print(f"Asking {j} to judge {len(rows)} sessions against: {topic!r} ...", file=sys.stderr, flush=True)
+        result = _call_judge(j, prompt)
+        if result.returncode == 0:
+            judge = j
+            break
+        print(f"ai search: {j} exited with an error", file=sys.stderr)
         if result.stdout:
             print(result.stdout, file=sys.stderr)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
-        if judge == "claude" and "session limit" in output.lower():
+        if j == "claude" and _is_session_limit(result):
+            if not judge_explicit and len(judges) > 1:
+                print("  -> falling back to next judge", file=sys.stderr)
+                continue
             print("  hint: Claude is at its session limit. Retry after the reset time, or use --judge codex / --judge kimi.", file=sys.stderr)
         sys.exit(result.returncode)
+    else:
+        # All judges exhausted without a successful break.
+        sys.exit(result.returncode if result else 1)
 
     picked = parse_numbers(result.stdout, len(rows))
     matched = [row for n, row in enumerate(rows, start=1) if n in picked]

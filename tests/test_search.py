@@ -161,7 +161,39 @@ def test_cmd_search_uses_requested_judge_tool(monkeypatch):
     assert calls[0][:2] == ["kimi", "-p"]
 
 
-def test_cmd_search_hints_on_claude_session_limit(monkeypatch, capsys):
+def test_cmd_search_fallback_on_claude_session_limit(monkeypatch, capsys):
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: [
+        {"tool": "codex", "id": "id-1", "ts": 1, "title": "x"},
+    ])
+    monkeypatch.setattr(sessions, "resolve_row", lambda r: (
+        r["tool"], r["id"], "1h ago", r["id"][:6], "?", r.get("title", "(no title)"),
+    ))
+    monkeypatch.setattr(sessions, "render_rows", lambda rows: None)
+
+    calls = []
+
+    class ClaudeLimit:
+        returncode = 1
+        stdout = "You've hit your session limit · resets 1:40pm"
+        stderr = ""
+
+    class CodexOK:
+        returncode = 0
+        stdout = "none"
+        stderr = ""
+
+    monkeypatch.setattr(search.subprocess, "run", lambda *a, **kw: calls.append((a, kw)) or (CodexOK if len(calls) > 1 else ClaudeLimit)())
+
+    search.cmd_search(["topic"])
+
+    assert len(calls) == 2
+    assert calls[0][0][0][:2] == ["claude", "-p"]
+    assert calls[1][0][0][:2] == ["codex", "exec"]
+    err = capsys.readouterr().err
+    assert "falling back" in err
+
+
+def test_cmd_search_explicit_claude_session_limit_shows_hint(monkeypatch, capsys):
     monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: [
         {"tool": "codex", "id": "id-1", "ts": 1, "title": "x"},
     ])
@@ -177,7 +209,7 @@ def test_cmd_search_hints_on_claude_session_limit(monkeypatch, capsys):
     monkeypatch.setattr(search.subprocess, "run", lambda *a, **kw: FakeResult())
 
     with pytest.raises(SystemExit) as exc_info:
-        search.cmd_search(["topic"])
+        search.cmd_search(["--judge", "claude", "topic"])
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "session limit" in err
