@@ -11,6 +11,14 @@ TOOL_UPDATE_CMD = {
     "kimi": ["kimi", "update"],
 }
 
+# claude's updater has no fallback mirror, so it's prone to hitting its own
+# internal download deadline on a slow-but-working connection -- confirmed
+# 2026-08-19: a failed `claude update` (TelemetrySafeError: exceeded the
+# total deadline) succeeded on a bare retry with no other change. codex and
+# kimi don't need this: codex already falls back to GitHub Releases
+# internally, and neither has shown this failure pattern.
+TOOL_UPDATE_RETRIES = {"claude": 2}
+
 # claude's updater fetches from a single Google-Cloud-fronted host with no
 # fallback mirror (unlike codex, which falls back to GitHub Releases when
 # its primary source stalls), so it fails more often -- especially on
@@ -62,8 +70,18 @@ def update_tools():
         if shutil.which(tool) is None:
             print(f"{tool}: not installed, skipping")
             continue
-        print(f"Updating {tool} ...", flush=True)
-        result = subprocess.run(argv)
+
+        retries = TOOL_UPDATE_RETRIES.get(tool, 0)
+        result = None
+        for attempt in range(1 + retries):
+            if attempt == 0:
+                print(f"Updating {tool} ...", flush=True)
+            else:
+                print(f"Updating {tool} (retry {attempt}/{retries}) ...", flush=True)
+            result = subprocess.run(argv)
+            if result.returncode == 0:
+                break
+
         if result.returncode != 0:
             worst = result.returncode
             hint = TOOL_UPDATE_HINTS.get(tool)

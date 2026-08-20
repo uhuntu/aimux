@@ -134,6 +134,52 @@ def test_update_tools_prints_hint_when_claude_fails(monkeypatch, capsys):
     assert "downloads.claude.ai" in err
 
 
+def test_update_tools_retries_claude_and_succeeds_without_hint(monkeypatch, capsys):
+    """Regression test: claude's own updater has no fallback mirror and can
+    hit its internal download deadline on a slow-but-working connection --
+    confirmed live, a failed claude update succeeded on a bare retry with
+    no other change. update_tools should retry claude automatically rather
+    than giving up (and printing the hint) after a single failure."""
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class FakeResult:
+        def __init__(self, code):
+            self.returncode = code
+
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[0])
+        if argv[0] == "claude" and calls.count("claude") == 1:
+            return FakeResult(1)  # fails first attempt
+        return FakeResult(0)  # succeeds on retry (and codex/kimi succeed normally)
+
+    monkeypatch.setattr(update.subprocess, "run", fake_run)
+
+    assert update.update_tools() == 0
+    assert calls.count("claude") == 2
+    assert "hint:" not in capsys.readouterr().err
+
+
+def test_update_tools_gives_up_after_exhausting_retries(monkeypatch):
+    monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    class FakeResult:
+        returncode = 1
+
+    calls = []
+
+    def fake_run(argv, **kwargs):
+        calls.append(argv[0])
+        return FakeResult()
+
+    monkeypatch.setattr(update.subprocess, "run", fake_run)
+
+    assert update.update_tools() != 0
+    # 1 initial attempt + TOOL_UPDATE_RETRIES["claude"] retries, then give up
+    assert calls.count("claude") == 1 + update.TOOL_UPDATE_RETRIES["claude"]
+
+
 def test_update_tools_no_hint_when_codex_or_kimi_fail(monkeypatch, capsys):
     monkeypatch.setattr(update.shutil, "which", lambda tool: f"/usr/bin/{tool}")
 
