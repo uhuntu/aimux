@@ -133,7 +133,10 @@ def cmd_search(argv):
 
     if result.returncode != 0:
         print(f"ai search: {judge} exited with an error", file=sys.stderr)
-        print(result.stderr, file=sys.stderr)
+        if result.stdout:
+            print(result.stdout, file=sys.stderr)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
         sys.exit(result.returncode)
 
     picked = parse_numbers(result.stdout, len(rows))
