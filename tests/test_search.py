@@ -161,6 +161,29 @@ def test_cmd_search_uses_requested_judge_tool(monkeypatch):
     assert calls[0][:2] == ["kimi", "-p"]
 
 
+def test_cmd_search_hints_on_claude_session_limit(monkeypatch, capsys):
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: [
+        {"tool": "codex", "id": "id-1", "ts": 1, "title": "x"},
+    ])
+    monkeypatch.setattr(sessions, "resolve_row", lambda r: (
+        r["tool"], r["id"], "1h ago", r["id"][:6], "?", r.get("title", "(no title)"),
+    ))
+
+    class FakeResult:
+        returncode = 1
+        stdout = "You've hit your session limit · resets 1:40pm"
+        stderr = ""
+
+    monkeypatch.setattr(search.subprocess, "run", lambda *a, **kw: FakeResult())
+
+    with pytest.raises(SystemExit) as exc_info:
+        search.cmd_search(["topic"])
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "session limit" in err
+    assert "--judge codex" in err
+
+
 def test_cmd_search_missing_judge_binary_reports_cleanly(monkeypatch, capsys):
     monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: [
         {"tool": "codex", "id": "id-1", "ts": 1, "title": "x"},

@@ -133,10 +133,13 @@ def cmd_search(argv):
 
     if result.returncode != 0:
         print(f"ai search: {judge} exited with an error", file=sys.stderr)
+        output = (result.stdout or "") + (result.stderr or "")
         if result.stdout:
             print(result.stdout, file=sys.stderr)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
+        if judge == "claude" and "session limit" in output.lower():
+            print("  hint: Claude is at its session limit. Retry after the reset time, or use --judge codex / --judge kimi.", file=sys.stderr)
         sys.exit(result.returncode)
 
     picked = parse_numbers(result.stdout, len(rows))
