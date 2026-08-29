@@ -16,22 +16,34 @@ No daemon, no config file, no build step — just a small Python package (`src/a
 pip install aimux-cli
 ```
 
-**Via curl**, one line, no manual clone:
+**Via curl** (macOS/Linux, or Windows with Git Bash/WSL), one line, no manual clone:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/uhuntu/aimux/master/install.sh | bash
+```
+
+**Via irm** (Windows PowerShell, no Git Bash/WSL/Cygwin needed):
+
+```powershell
+irm https://raw.githubusercontent.com/uhuntu/aimux/master/install.ps1 | iex
 ```
 
 **Via git**, if you'd rather clone it yourself first:
 
 ```bash
 git clone https://github.com/uhuntu/aimux.git
-cd aimux && ./install.sh
+cd aimux && ./install.sh        # Windows PowerShell: .\install.ps1
 ```
 
-Either of the last two symlinks `ai`, `ai-sessions`, and the `aim`/`aimux` aliases into `~/.local/bin` (override with `AIMUX_BIN_DIR=/some/other/dir`). The curl form clones the repo to `~/.local/share/aimux` first (override with `AIMUX_REPO_DIR`). Nothing is copied — the clone stays the source of truth.
+Whichever of the last three you use, it clones the repo to `~/.local/share/aimux` first (override with `AIMUX_REPO_DIR`), then wires up `ai`, `ai-sessions`, and the `aim`/`aimux` aliases in `~/.local/bin` (override with `AIMUX_BIN_DIR`) — as symlinks on `install.sh`, or native `.cmd` launchers on `install.ps1`. Nothing is copied — the clone stays the source of truth.
 
 Requires `claude`, `codex`, and/or `kimi` already installed and on `PATH` (only the ones you actually use need to be present).
+
+> **Windows note:** running the curl one-liner from PowerShell/cmd (rather than Git Bash) can invoke the WSL `bash` launcher by mistake instead of Git's — use `irm` above, or run curl from Git Bash directly. `install.sh` also copes if Git Bash lacks symlink privilege (falls back to a generated launcher instead of a broken copy) or `python3` on `PATH` is the Microsoft Store's no-op stub (probes `python`/`py -3` instead). Files installed by `install.sh` are still extensionless with a shebang line, though, which PowerShell can't execute directly — `install.ps1`'s `.cmd` launchers don't have that problem. If you stick with `install.sh`, call `ai` from Git Bash instead, or add a function to your PowerShell `$PROFILE`:
+> ```powershell
+> function ai { & "C:\Path\To\python.exe" "$HOME\.local\share\aimux\bin\ai" @args }
+> ```
+
 
 ## Update
 

@@ -26,7 +26,7 @@ def write_list_cache(entries):
     """entries: list of {"tool": ..., "id": ...} in printed order."""
     try:
         os.makedirs(os.path.dirname(LIST_CACHE_FILE), exist_ok=True)
-        with open(LIST_CACHE_FILE, "w") as fh:
+        with open(LIST_CACHE_FILE, "w", encoding="utf-8") as fh:
             json.dump(entries, fh)
     except OSError:
         pass  # best-effort -- resume-by-number just won't work this time
@@ -49,7 +49,7 @@ def exec_or_die(argv):
 
 def read_json(path):
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except Exception:
         return None
@@ -57,7 +57,7 @@ def read_json(path):
 
 def read_jsonl(path):
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             for line in fh:
                 line = line.strip()
                 if not line:
@@ -119,7 +119,7 @@ def claude_snippet(path, max_messages=12, max_chars=800):
     where the relevant message was at line 92.)"""
     texts = []
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i > 2000 or len(texts) >= max_messages:
                     break
@@ -145,7 +145,7 @@ def claude_title_and_cwd(path, cwd_fallback):
     title = "(no title)"
     cwd = None
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i > 40 or (title != "(no title)" and cwd):
                     break
@@ -263,7 +263,7 @@ def _codex_genuine_user_messages(path, max_messages, scan_limit=2000):
     with no way to find or label that session)."""
     texts = []
     try:
-        with open(path) as fh:
+        with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i > scan_limit or len(texts) >= max_messages:
                     break
@@ -370,7 +370,7 @@ def kimi_light_records(show_all):
 def kimi_title(sdir):
     wire = os.path.join(sdir, "agents", "main", "wire.jsonl")
     try:
-        with open(wire) as fh:
+        with open(wire, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i > 60:
                     break
@@ -394,7 +394,7 @@ def kimi_snippet(sdir, max_messages=12, max_chars=800):
     wire = os.path.join(sdir, "agents", "main", "wire.jsonl")
     texts = []
     try:
-        with open(wire) as fh:
+        with open(wire, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
                 if i > 2000 or len(texts) >= max_messages:
                     break
