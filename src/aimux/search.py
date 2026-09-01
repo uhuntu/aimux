@@ -79,8 +79,8 @@ def _call_judge(judge, prompt):
     judge_cmd = JUDGE_CMD[judge]
     try:
         if judge in JUDGE_USES_STDIN:
-            return subprocess.run(judge_cmd, input=prompt, capture_output=True, text=True)
-        return subprocess.run([*judge_cmd, prompt], capture_output=True, text=True)
+            return subprocess.run(judge_cmd, input=prompt, capture_output=True, text=True, encoding="utf-8")
+        return subprocess.run([*judge_cmd, prompt], capture_output=True, text=True, encoding="utf-8")
     except FileNotFoundError:
         print(f"ai search: '{judge_cmd[0]}' not found on PATH", file=sys.stderr)
         sys.exit(127)
