@@ -110,31 +110,72 @@ def extract_text_from_content(content, text_types=("text",)):
     return None
 
 
+def sample_stride(texts, limit):
+    """Evenly-spaced sample across the full list, not just the first
+    `limit`. A conversation often covers several sequential topics before
+    reaching the current one -- a real 104-message session had its
+    relevant content at message 71, in the latter-middle stretch: neither
+    a first-N-only scan nor a first+last split reliably lands there, but a
+    stride across the whole conversation does (index 69, one stride step
+    away). `limit` <= 2 keeps plain first-N behavior (used for title
+    extraction, which wants literally the first message)."""
+    if len(texts) <= limit or limit <= 2:
+        return texts[:limit]
+    step = len(texts) / limit
+    indices = sorted({int(i * step) for i in range(limit)})
+    return [texts[i] for i in indices]
+
+
+def join_with_fair_budget(texts, max_chars):
+    """Join sampled texts into one snippet, giving each an equal share of
+    max_chars rather than truncating the joined whole -- otherwise verbose
+    early messages consume the entire budget and silently drop everything
+    sampled from later in the conversation (the exact bug that made
+    sample_stride's own fix ineffective until this was added)."""
+    if not texts:
+        return ""
+    per_message = max(40, max_chars // len(texts))
+    return " | ".join(t[:per_message] for t in texts)[:max_chars]
+
+
 def claude_snippet(path, max_messages=12, max_chars=800):
     """A longer excerpt than claude_title_and_cwd's single-message title,
-    for `ai search`: concatenates up to max_messages user message texts so
-    a topic that only shows up partway into the conversation can still
-    match. (Previously capped at the first 80 lines / 3 messages, which
-    missed real topics that first appeared later -- e.g. a 191-line session
-    where the relevant message was at line 92.)"""
+    for `ai search`: concatenates up to max_messages message texts so a
+    topic that only shows up partway into the conversation can still match.
+    (Previously capped at the first 80 lines / 3 messages, which missed
+    real topics that first appeared later -- e.g. a 191-line session where
+    the relevant message was at line 92.)
+
+    Includes assistant text, not just user messages: in agentic sessions
+    the user often gives short directives ("check it", "yes", "6 taps")
+    while the assistant's own prose describes what was actually done and
+    found -- a real session's substance (decompiling an APK, the specific
+    files involved) was entirely in Claude's responses, invisible to a
+    user-only scan, so `ai search` couldn't find it even though it was
+    exactly on topic.
+
+    Sampled evenly across the whole conversation via sample_stride, not
+    just the first max_messages: a long conversation's relevant content
+    can sit well past the first dozen messages (a real 104-message session
+    had it at message 71, in the latter-middle stretch)."""
     texts = []
     try:
         with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
-                if i > 2000 or len(texts) >= max_messages:
+                if i > 2000:
                     break
                 try:
                     d = json.loads(line)
                 except Exception:
                     continue
-                if d.get("type") != "user":
+                if d.get("type") not in ("user", "assistant"):
                     continue
                 text = extract_text_from_content(d.get("message", {}).get("content"))
                 if text:
                     texts.append(text.strip().replace("\n", " "))
     except FileNotFoundError:
         pass
-    return " | ".join(texts)[:max_chars]
+    return join_with_fair_budget(sample_stride(texts, max_messages), max_chars)
 
 
 def claude_title_and_cwd(path, cwd_fallback):
@@ -252,20 +293,22 @@ CODEX_BOILERPLATE_PREFIXES = (
 )
 
 
-def _codex_genuine_user_messages(path, max_messages, scan_limit=2000):
-    """Shared scan for codex_rollout_title/codex_rollout_snippet: yields
-    genuine user message texts from a rollout file, skipping injected
-    boilerplate (AGENTS.md instructions, permission setup, environment
-    context) by its distinctive prefix rather than by length -- a length
-    cutoff also filters out legitimate long, detailed task requests (a real
-    session had a 1304-char genuine message wrongly treated as boilerplate
-    and skipped entirely, leaving both `ai search` and the plain listing
-    with no way to find or label that session)."""
+def _codex_genuine_messages(path, max_messages, roles=("user",), scan_limit=2000):
+    """Shared scan for codex_rollout_title/codex_rollout_snippet: genuine
+    message texts from a rollout file for the given roles, skipping
+    injected boilerplate (AGENTS.md instructions, permission setup,
+    environment context) by its distinctive prefix rather than by length --
+    a length cutoff also filters out legitimate long, detailed task
+    requests (a real session had a 1304-char genuine message wrongly
+    treated as boilerplate and skipped entirely, leaving both `ai search`
+    and the plain listing with no way to find or label that session).
+    Sampled evenly across the whole conversation via sample_stride, not
+    just the first max_messages -- see its docstring."""
     texts = []
     try:
         with open(path, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
-                if i > scan_limit or len(texts) >= max_messages:
+                if i > scan_limit:
                     break
                 try:
                     d = json.loads(line)
@@ -274,9 +317,9 @@ def _codex_genuine_user_messages(path, max_messages, scan_limit=2000):
                 if d.get("type") != "response_item":
                     continue
                 payload = d.get("payload", {})
-                if payload.get("type") != "message" or payload.get("role") != "user":
+                if payload.get("type") != "message" or payload.get("role") not in roles:
                     continue
-                text = extract_text_from_content(payload.get("content"), text_types=("input_text", "text"))
+                text = extract_text_from_content(payload.get("content"), text_types=("input_text", "text", "output_text"))
                 if not text:
                     continue
                 stripped = text.strip()
@@ -285,7 +328,7 @@ def _codex_genuine_user_messages(path, max_messages, scan_limit=2000):
                 texts.append(stripped.replace("\n", " "))
     except FileNotFoundError:
         pass
-    return texts
+    return sample_stride(texts, max_messages)
 
 
 def codex_rollout_title(sid):
@@ -294,18 +337,24 @@ def codex_rollout_title(sid):
     path = codex_rollout_path(sid)
     if not path:
         return "(no title)"
-    texts = _codex_genuine_user_messages(path, max_messages=1)
+    texts = _codex_genuine_messages(path, max_messages=1, roles=("user",))
     return texts[0][:70] if texts else "(no title)"
 
 
 def codex_rollout_snippet(sid, max_messages=12, max_chars=800):
     """Longer excerpt than codex_rollout_title's single-message title, for
-    `ai search`. Mirrors claude_snippet/kimi_snippet."""
+    `ai search`. Mirrors claude_snippet/kimi_snippet. Includes assistant
+    text, not just user messages: in agentic sessions the user often gives
+    short directives ("check it", "yes", "6 taps") while the assistant's
+    own prose describes what was actually done and found -- a real session
+    about decompiling an APK had that entire substance in Codex's own
+    responses, invisible to a user-only scan, so `ai search` couldn't find
+    it even though it was exactly on topic."""
     path = codex_rollout_path(sid)
     if not path:
         return ""
-    texts = _codex_genuine_user_messages(path, max_messages=max_messages)
-    return " | ".join(texts)[:max_chars]
+    texts = _codex_genuine_messages(path, max_messages=max_messages, roles=("user", "assistant"))
+    return join_with_fair_budget(texts, max_chars)
 
 
 def codex_cwd(sid):
@@ -390,21 +439,33 @@ def kimi_title(sdir):
 def kimi_snippet(sdir, max_messages=12, max_chars=800):
     """Longer excerpt than kimi_title's single-prompt title, for `ai search`.
     Same wider window as claude_snippet -- a topic that only shows up
-    partway into the conversation should still be visible to the judge."""
+    partway into the conversation should still be visible to the judge.
+
+    Includes assistant response text, not just user prompts: in agentic
+    sessions the user often gives short directives while the assistant's
+    own prose describes what was actually done and found -- see
+    claude_snippet's docstring for a real example of this exact failure.
+    Sampled evenly across the whole conversation via sample_stride, not
+    just the first max_messages -- see its docstring."""
     wire = os.path.join(sdir, "agents", "main", "wire.jsonl")
     texts = []
     try:
         with open(wire, encoding="utf-8") as fh:
             for i, line in enumerate(fh):
-                if i > 2000 or len(texts) >= max_messages:
+                if i > 2000:
                     break
                 try:
                     d = json.loads(line)
                 except Exception:
                     continue
-                if d.get("type") != "turn.prompt":
+                if d.get("type") == "turn.prompt":
+                    blocks = d.get("input", [])
+                elif d.get("type") == "context.append_loop_event" and d.get("event", {}).get("type") == "content.part":
+                    part = d["event"].get("part", {})
+                    blocks = [part] if part.get("type") == "text" else []
+                else:
                     continue
-                for block in d.get("input", []):
+                for block in blocks:
                     if isinstance(block, dict) and block.get("type") == "text":
                         t = block.get("text", "").strip().replace("\n", " ")
                         if t:
@@ -412,7 +473,7 @@ def kimi_snippet(sdir, max_messages=12, max_chars=800):
                         break
     except FileNotFoundError:
         pass
-    return " | ".join(texts)[:max_chars]
+    return join_with_fair_budget(sample_stride(texts, max_messages), max_chars)
 
 
 def kimi_session_cwd(sid):

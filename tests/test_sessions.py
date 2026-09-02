@@ -189,6 +189,42 @@ def test_codex_rollout_title_does_not_treat_long_real_messages_as_boilerplate(mo
     assert title.startswith("Hunt,")
 
 
+def test_codex_rollout_snippet_includes_assistant_text(monkeypatch, tmp_path):
+    """Regression test: a real session about decompiling the SetupWizard
+    APK on device MACH_MP had its entire substance in Codex's own
+    responses -- the user only sent short directives and file-path
+    fragments. codex_rollout_snippet must scan assistant output_text too,
+    not just user input_text, or `ai search` misses genuinely on-topic
+    sessions like this one entirely."""
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    sid = "01a037ea-949e-7a90-bd26-df49edc1585a"
+    day_dir = codex_home / "sessions" / "2026" / "08" / "25"
+    day_dir.mkdir(parents=True)
+    path = day_dir / f"rollout-2026-08-25T15-55-15-{sid}.jsonl"
+    path.write_text(
+        json.dumps({"type": "session_meta", "payload": {"id": sid, "cwd": "/x"}}) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "6 taps"}]},
+        }) + "\n"
+        + json.dumps({
+            "type": "response_item",
+            "payload": {"type": "message", "role": "assistant", "content": [
+                {"type": "output_text", "text": "I decompiled the SetupWizard APK from device MACH_MP into SetupWizard-MACH_MP-decompiled-bad"},
+            ]},
+        }) + "\n"
+    )
+    monkeypatch.setattr(sessions, "CODEX_HOME", str(codex_home))
+
+    snippet = sessions.codex_rollout_snippet(sid)
+    assert "SetupWizard-MACH_MP-decompiled-bad" in snippet
+
+    # title stays user-only -- it's meant to reflect what was asked, and
+    # shouldn't turn into a chunk of the assistant's response
+    assert sessions.codex_rollout_title(sid) == "6 taps"
+
+
 def test_codex_rollout_snippet_collects_multiple_messages(monkeypatch, tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -336,12 +372,75 @@ def test_claude_content_list_with_text_block(tmp_path):
     assert title == "the real prompt"
 
 
+def test_sample_stride_covers_latter_middle_of_long_list():
+    """Regression test: a real 104-message session had its relevant
+    content at message 71 -- neither a first-N-only scan nor a first+last
+    split reliably lands there (71 is past the first dozen, but well
+    before the last dozen too). An even stride across the whole list
+    should land near it."""
+    texts = [str(i) for i in range(104)]
+    sampled = sessions.sample_stride(texts, 12)
+    assert any(abs(int(t) - 71) <= 4 for t in sampled)
+
+
+def test_sample_stride_short_list_returns_everything():
+    texts = ["a", "b", "c"]
+    assert sessions.sample_stride(texts, 12) == texts
+
+
+def test_sample_stride_title_sized_limit_keeps_plain_first_n():
+    # limit <= 2 is used for title extraction, which wants literally the
+    # first message(s) in order, not a stride blend
+    texts = [str(i) for i in range(50)]
+    assert sessions.sample_stride(texts, 1) == ["0"]
+
+
+def test_join_with_fair_budget_gives_every_message_a_share():
+    """Regression test: joining sampled texts then truncating the whole
+    string let early, verbose messages consume the entire budget, silently
+    dropping every later-sampled message -- the exact bug that made
+    sample_stride's own fix ineffective on the real session until this was
+    added (all 6 early messages combined already exceeded the char budget,
+    so the 6 later ones, including the actually relevant one, never
+    appeared in the final snippet)."""
+    texts = ["x" * 500, "SetupWizard MACH_MP decompiled", "y" * 500]
+    result = sessions.join_with_fair_budget(texts, max_chars=300)
+    assert "SetupWizard" in result
+
+
+def test_claude_snippet_includes_assistant_text(tmp_path):
+    """Regression test: a real session's substance (decompiling an APK,
+    the specific files/findings) was entirely in the assistant's own
+    responses -- the user only gave short directives ("yes", "6 taps").
+    A user-only scan found nothing, even though the session was exactly
+    on topic; `ai search` reported no relevant sessions for a real match."""
+    session_file = tmp_path / "s.jsonl"
+    session_file.write_text(
+        json.dumps({"type": "user", "message": {"content": "check it"}}) + "\n"
+        + json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "thinking", "thinking": "let me check"}]},
+        }) + "\n"
+        + json.dumps({
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "I decompiled the SetupWizard APK from device MACH_MP"}]},
+        }) + "\n"
+    )
+
+    snippet = sessions.claude_snippet(str(session_file))
+    assert "decompiled the SetupWizard APK" in snippet
+    assert "let me check" not in snippet  # thinking blocks are not real response text
+
+
 def test_claude_snippet_finds_topic_past_old_80_line_cutoff(tmp_path):
     """Regression test: a real session had its relevant message at line 92
     of 191, past the old 80-line/3-message scan window, so `ai search`
     never saw it and wrongly reported no relevant sessions."""
     session_file = tmp_path / "s.jsonl"
-    lines = [json.dumps({"type": "assistant", "message": {"content": "padding"}}) for _ in range(90)]
+    # irrelevant event type, not "user"/"assistant" -- padding that both the
+    # old and new scan logic correctly skip, isolating this test to the
+    # scan-window fix rather than the separate assistant-text fix
+    lines = [json.dumps({"type": "queue-operation", "content": "padding"}) for _ in range(90)]
     lines.append(json.dumps({
         "type": "user",
         "message": {"content": "please change the default navigation bar mode from taskbar back"},
@@ -368,6 +467,29 @@ def test_kimi_resolve_tries_session_prefix_fallback(monkeypatch, tmp_path):
     assert sessions.kimi_resolve("97946bc7") == ["session_97946bc7-c5d4-4419-85d1-1316cb7f4295"]
     # already-prefixed also works
     assert sessions.kimi_resolve("session_97946bc7") == ["session_97946bc7-c5d4-4419-85d1-1316cb7f4295"]
+
+
+def test_kimi_snippet_includes_assistant_response_text(tmp_path):
+    sess_dir = tmp_path / "sessdir"
+    (sess_dir / "agents" / "main").mkdir(parents=True)
+    wire = sess_dir / "agents" / "main" / "wire.jsonl"
+    wire.write_text(
+        json.dumps({"type": "turn.prompt", "input": [{"type": "text", "text": "check it"}]}) + "\n"
+        + json.dumps({
+            "type": "context.append_loop_event",
+            "event": {"type": "content.part", "part": {"type": "think", "think": "let me check"}},
+        }) + "\n"
+        + json.dumps({
+            "type": "context.append_loop_event",
+            "event": {"type": "content.part", "part": {
+                "type": "text", "text": "I decompiled the SetupWizard APK from device MACH_MP",
+            }},
+        }) + "\n"
+    )
+
+    snippet = sessions.kimi_snippet(str(sess_dir))
+    assert "decompiled the SetupWizard APK" in snippet
+    assert "let me check" not in snippet  # think parts are not real response text
 
 
 def test_kimi_snippet_finds_topic_past_old_120_line_cutoff(tmp_path):
