@@ -29,7 +29,10 @@ JUDGE_CMD = {
     # text as its title, polluting the very listing this command reads.
     # kimi has no equivalent flag, so `--judge kimi` will still leak one.
     "claude": ["claude", "-p", "--no-session-persistence"],
-    "codex": ["codex", "exec", "--ephemeral"],
+    # --skip-git-repo-check: the search can be run from any cwd (often ~,
+    # not a git repo), and codex exec otherwise refuses with "Not inside a
+    # trusted directory".
+    "codex": ["codex", "exec", "--ephemeral", "--skip-git-repo-check"],
     "kimi": ["kimi", "-p"],
 }
 DEFAULT_JUDGE = "claude"
