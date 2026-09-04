@@ -241,3 +241,149 @@ def test_cmd_search_no_candidates(monkeypatch, capsys):
     search.cmd_search(["topic"])
 
     assert "No sessions found" in capsys.readouterr().out
+
+
+# ---------- chunking ----------
+
+def _fake_candidates(n):
+    return [{"tool": "codex", "id": f"id-{i}", "ts": n - i, "title": f"session {i}"} for i in range(n)]
+
+
+def _stub_resolve_and_render(monkeypatch):
+    monkeypatch.setattr(sessions, "resolve_row", lambda r: (
+        r["tool"], r["id"], "1h ago", r["id"][:8], "?", r.get("title", "(no title)"),
+    ))
+    rendered = []
+    monkeypatch.setattr(sessions, "render_rows", lambda rows: rendered.append(rows))
+    return rendered
+
+
+def test_cmd_search_splits_into_chunks_of_chunk_size(monkeypatch):
+    """Regression test: a single 493-candidate batch demonstrably missed a
+    real match (confirmed by checking the missed candidate's snippet,
+    which contained the search term just as clearly as the one that *was*
+    found) -- a 'lost in a long list' recall failure. Candidates must be
+    split into CHUNK_SIZE-sized batches, each judged independently."""
+    n = search.CHUNK_SIZE * 2 + 30  # 3 chunks: 100, 100, 30
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: _fake_candidates(n))
+    _stub_resolve_and_render(monkeypatch)
+
+    seen_sizes = []
+
+    class FakeResult:
+        returncode = 0
+        stdout = "none"
+        stderr = ""
+
+    def fake_run(argv, input=None, **kw):
+        seen_sizes.append(input.count("\n1. ["))  # each chunk's prompt starts numbering at 1
+        return FakeResult()
+
+    monkeypatch.setattr(search.subprocess, "run", fake_run)
+
+    search.cmd_search(["topic"])
+
+    assert len(seen_sizes) == 3
+    assert sum(seen_sizes) == 3  # one "1. [" per chunk, confirming 3 separate prompts
+
+
+def test_cmd_search_unions_matches_across_chunks(monkeypatch):
+    """Each chunk is numbered locally (1..len(chunk)); matches from later
+    chunks must map back to the correct global candidate, not collide with
+    chunk 1's numbering."""
+    n = search.CHUNK_SIZE + 5
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: _fake_candidates(n))
+    rendered = _stub_resolve_and_render(monkeypatch)
+    monkeypatch.setattr(search, "snippet_for", lambda r: "")
+
+    class FakeResult:
+        def __init__(self, stdout):
+            self.returncode = 0
+            self.stdout = stdout
+            self.stderr = ""
+
+    def fake_run(argv, input=None, **kw):
+        # chunk 1 (global candidates 0..99) opens with "session 0"; chunk 2
+        # (100..104) opens with "session 100" -- identify by content, not
+        # call order, since chunks run in parallel threads.
+        if "— session 0 ::" in input:
+            return FakeResult("1")  # local #1 in chunk 1 -> global candidate 0
+        return FakeResult("2")  # local #2 in chunk 2 (offset 100) -> global row 102 -> id-101
+
+    monkeypatch.setattr(search.subprocess, "run", fake_run)
+
+    search.cmd_search(["topic"])
+
+    assert len(rendered) == 1
+    matched_ids = {row[1] for row in rendered[0]}
+    assert matched_ids == {"id-0", "id-101"}
+
+
+def test_cmd_search_partial_failure_still_shows_other_chunks(monkeypatch, capsys):
+    n = search.CHUNK_SIZE + 5
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: _fake_candidates(n))
+    rendered = _stub_resolve_and_render(monkeypatch)
+    monkeypatch.setattr(search, "snippet_for", lambda r: "")
+
+    class Fail:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    class OK:
+        returncode = 0
+        stdout = "1"  # local #1 in chunk 2 (offset 100) -> global row 101 -> id-100
+        stderr = ""
+
+    def fake_run(argv, input=None, **kw):
+        # chunk 1 (contains "session 0") always fails every fallback judge;
+        # chunk 2 succeeds immediately.
+        return Fail() if "— session 0 ::" in input else OK()
+
+    monkeypatch.setattr(search.subprocess, "run", fake_run)
+
+    search.cmd_search(["topic"])
+
+    err = capsys.readouterr().err
+    assert "batches failed; showing partial results" in err
+    assert len(rendered) == 1
+    matched_ids = {row[1] for row in rendered[0]}
+    assert matched_ids == {"id-100"}  # only chunk 2's match survives
+
+
+def test_cmd_search_all_chunks_fail_exits_nonzero(monkeypatch):
+    n = search.CHUNK_SIZE + 5
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: _fake_candidates(n))
+    _stub_resolve_and_render(monkeypatch)
+
+    class Fail:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr(search.subprocess, "run", lambda *a, **kw: Fail())
+
+    with pytest.raises(SystemExit) as exc_info:
+        search.cmd_search(["--judge", "claude", "topic"])
+    assert exc_info.value.code != 0
+
+
+def test_cmd_search_single_small_batch_no_batch_label(monkeypatch, capsys):
+    """With <= CHUNK_SIZE candidates there's only one chunk -- the status
+    line shouldn't talk about "batch 1/1", matching the pre-chunking
+    output format for the common case."""
+    monkeypatch.setattr(search, "gather_candidates", lambda tool_filter: _fake_candidates(3))
+    _stub_resolve_and_render(monkeypatch)
+
+    class FakeResult:
+        returncode = 0
+        stdout = "none"
+        stderr = ""
+
+    monkeypatch.setattr(search.subprocess, "run", lambda *a, **kw: FakeResult())
+
+    search.cmd_search(["topic"])
+
+    err = capsys.readouterr().err
+    assert "batch" not in err.lower()
+    assert "3 sessions against" in err
